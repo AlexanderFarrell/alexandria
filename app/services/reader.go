@@ -28,9 +28,13 @@ func (s *ReaderService) GetProgress(ctx context.Context, userID, bookID string) 
 }
 
 // SaveProgress creates or updates the reading position.
-func (s *ReaderService) SaveProgress(ctx context.Context, userID, bookID, cfi string, percentage float64) (*domain.ReadingProgress, error) {
+// rating is optional (nil = no change); valid values are 1–5.
+func (s *ReaderService) SaveProgress(ctx context.Context, userID, bookID, cfi string, percentage float64, rating *int) (*domain.ReadingProgress, error) {
 	if percentage < 0 || percentage > 1 {
 		return nil, fmt.Errorf("%w: percentage must be between 0 and 1", domain.ErrBadRequest)
+	}
+	if rating != nil && (*rating < 1 || *rating > 5) {
+		return nil, fmt.Errorf("%w: rating must be between 1 and 5", domain.ErrBadRequest)
 	}
 
 	existing, err := s.progress.GetByUserAndBook(ctx, userID, bookID)
@@ -58,6 +62,11 @@ func (s *ReaderService) SaveProgress(ctx context.Context, userID, bookID, cfi st
 		if percentage >= 1.0 && p.FinishedAt == nil {
 			p.FinishedAt = &now
 		}
+	}
+
+	// Only overwrite existing rating if a new one is supplied — nil preserves previous value.
+	if rating != nil {
+		p.Rating = rating
 	}
 
 	if err := s.progress.Save(ctx, p); err != nil {

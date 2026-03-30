@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,7 +21,7 @@ import (
 )
 
 func TestUploadAllowsLargeMultipartBooks(t *testing.T) {
-	srv, cfg := newTestServer(t)
+	srv, cfg := newTestServer(t, 8*1024*1024)
 	token := registerTestUser(t, srv, "reader_large_upload")
 
 	largePayload := bytes.Repeat([]byte("x"), 6*1024*1024)
@@ -61,7 +62,27 @@ func TestUploadAllowsLargeMultipartBooks(t *testing.T) {
 	}
 }
 
-func newTestServer(t *testing.T) (*FiberServer, *config.Config) {
+func TestUploadRejectsMultipartBooksOverConfiguredLimit(t *testing.T) {
+	srv, _ := newTestServer(t, 1*1024*1024)
+	token := registerTestUser(t, srv, "reader_limit_rejection")
+	baseURL := startTestHTTPServer(t, srv)
+
+	oversizedPayload := bytes.Repeat([]byte("x"), 2*1024*1024)
+	req := newLiveUploadRequest(t, baseURL, oversizedPayload, "too-large.epub", token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("upload oversized book: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 413, got %d: %s", resp.StatusCode, body)
+	}
+}
+
+func newTestServer(t *testing.T, uploadMaxBytes int) (*FiberServer, *config.Config) {
 	t.Helper()
 
 	baseDir := t.TempDir()
@@ -72,7 +93,7 @@ func newTestServer(t *testing.T) (*FiberServer, *config.Config) {
 		JWTSecret:      "test-secret",
 		JWTExpiry:      15 * time.Minute,
 		RefreshExpiry:  24 * time.Hour,
-		UploadMaxBytes: 64 * 1024 * 1024,
+		UploadMaxBytes: uploadMaxBytes,
 	}
 
 	db, err := sqlite.Open(cfg.DBPath)
@@ -84,12 +105,36 @@ func newTestServer(t *testing.T) (*FiberServer, *config.Config) {
 		sqlite.NewUserRepo(db),
 		sqlite.NewBookRepo(db),
 		sqlite.NewProgressRepo(db),
+		sqlite.NewListRepo(db),
 		storage.NewLocalFileStore(cfg.DataDir),
 		epub.New(),
 		cfg,
 	)
 
 	return New(application, "", cfg.UploadMaxBytes), cfg
+}
+
+func startTestHTTPServer(t *testing.T, srv *FiberServer) string {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on test port: %v", err)
+	}
+
+	go func() {
+		if err := srv.app.Listener(ln); err != nil {
+			t.Logf("test fiber server stopped: %v", err)
+		}
+	}()
+
+	t.Cleanup(func() {
+		if err := srv.Shutdown(); err != nil {
+			t.Logf("shutdown test server: %v", err)
+		}
+	})
+
+	return "http://" + ln.Addr().String()
 }
 
 func registerTestUser(t *testing.T, srv *FiberServer, username string) string {
@@ -127,6 +172,30 @@ func registerTestUser(t *testing.T, srv *FiberServer, username string) string {
 func newUploadRequest(t *testing.T, content []byte, filename, token string) *http.Request {
 	t.Helper()
 
+	body, contentType := newUploadBody(t, content, filename)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/books", body)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Authorization", "Bearer "+token)
+	return req
+}
+
+func newLiveUploadRequest(t *testing.T, baseURL string, content []byte, filename, token string) *http.Request {
+	t.Helper()
+
+	body, contentType := newUploadBody(t, content, filename)
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/books", body)
+	if err != nil {
+		t.Fatalf("create live upload request: %v", err)
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Authorization", "Bearer "+token)
+	return req
+}
+
+func newUploadBody(t *testing.T, content []byte, filename string) (*bytes.Buffer, string) {
+	t.Helper()
+
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
@@ -141,8 +210,5 @@ func newUploadRequest(t *testing.T, content []byte, filename, token string) *htt
 		t.Fatalf("close multipart writer: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/books", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+token)
-	return req
+	return &body, writer.FormDataContentType()
 }

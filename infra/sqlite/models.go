@@ -27,10 +27,10 @@ func (BookModel) TableName() string { return "books" }
 
 // UserModel is the GORM persistence model for a User.
 type UserModel struct {
-	ID           string `gorm:"primaryKey"`
-	Username     string `gorm:"uniqueIndex;not null"`
+	ID           string  `gorm:"primaryKey"`
+	Username     string  `gorm:"uniqueIndex;not null"`
 	Email        *string `gorm:"uniqueIndex"` // pointer so absent emails are NULL, not "" (avoids UNIQUE conflict)
-	PasswordHash string `gorm:"not null"`
+	PasswordHash string  `gorm:"not null"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -45,6 +45,7 @@ type ProgressModel struct {
 	BookID            string     `gorm:"not null;uniqueIndex:idx_user_book"`
 	CFI               string
 	Percentage        float64
+	Rating            *int       // 1–5; nil means unrated
 	ZealotProgressRef *string
 	StartedAt         time.Time
 	LastReadAt        time.Time
@@ -52,3 +53,25 @@ type ProgressModel struct {
 }
 
 func (ProgressModel) TableName() string { return "reading_progress" }
+
+// BookListModel is the GORM persistence model for a BookList.
+type BookListModel struct {
+	ID          string `gorm:"primaryKey"`
+	UserID      string `gorm:"not null;index"`
+	Name        string `gorm:"not null"`
+	Description string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (BookListModel) TableName() string { return "book_lists" }
+
+// BookListItemModel links a book to a list.
+// The combination (ListID, BookID) is unique.
+type BookListItemModel struct {
+	ListID  string    `gorm:"not null;uniqueIndex:idx_list_book"`
+	BookID  string    `gorm:"not null;uniqueIndex:idx_list_book"`
+	AddedAt time.Time
+}
+
+func (BookListItemModel) TableName() string { return "book_list_items" }

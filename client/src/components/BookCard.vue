@@ -1,8 +1,8 @@
 <template>
-  <div class="book-card card" @click="$emit('open', book)">
+  <div class="book-card card" @click="$emit('show-detail', book)">
     <div class="cover-wrap">
       <img
-        v-if="book.cover_path"
+        v-if="coverSrc"
         :src="coverSrc"
         :alt="book.title"
         class="cover"
@@ -19,23 +19,28 @@
         <div class="progress-bar" :style="{ width: `${Math.round(progress.percentage * 100)}%` }" />
         <span class="progress-label">{{ Math.round(progress.percentage * 100) }}%</span>
       </div>
+      <RatingStars v-if="progress?.rating" :rating="progress.rating" class="card-rating" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { coverUrl } from '@/api/books'
+import { useBookCover } from '@/composables/useBookCover'
 import type { Book, ReadingProgress } from '@/types'
+import RatingStars from './RatingStars.vue'
 
 const props = defineProps<{
   book: Book
   progress?: ReadingProgress | null
 }>()
 
-defineEmits<{ (e: 'open', book: Book): void }>()
+defineEmits<{ (e: 'show-detail', book: Book): void }>()
 
-const coverSrc = computed(() => coverUrl(props.book.id))
+const coverSrc = useBookCover(
+  () => props.book.id,
+  () => Boolean(props.book.cover_path),
+)
 
 const initials = computed(() => {
   const words = props.book.title.split(' ').slice(0, 2)
@@ -120,5 +125,10 @@ const initials = computed(() => {
 .progress-label {
   font-size: 0.7rem;
   color: var(--text-muted);
+}
+
+.card-rating {
+  font-size: 0.7rem;
+  margin-top: 0.2rem;
 }
 </style>

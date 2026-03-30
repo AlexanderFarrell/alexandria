@@ -37,6 +37,7 @@ func (h *ReaderHandler) GetProgress(c *fiber.Ctx) error {
 type saveProgressRequest struct {
 	CFI        string  `json:"cfi"`
 	Percentage float64 `json:"percentage"`
+	Rating     *int    `json:"rating"` // optional; 1–5
 }
 
 // SaveProgress handles PUT /api/v1/books/:id/progress
@@ -49,7 +50,7 @@ func (h *ReaderHandler) SaveProgress(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
-	progress, err := h.reader.SaveProgress(c.Context(), userID, bookID, req.CFI, req.Percentage)
+	progress, err := h.reader.SaveProgress(c.Context(), userID, bookID, req.CFI, req.Percentage, req.Rating)
 	if err != nil {
 		return respondErr(c, err)
 	}

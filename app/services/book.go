@@ -31,6 +31,13 @@ type BookUpdate struct {
 	Author         *string
 	Description    *string
 	ZealotTicketID *string
+	// Metadata fields
+	ISBN        *string
+	Publisher   *string
+	PublishedAt *time.Time
+	Language    *string
+	Genres      *[]string
+	Tags        *[]string
 }
 
 // BookService handles book library operations.
@@ -146,6 +153,24 @@ func (s *BookService) Update(ctx context.Context, id string, u BookUpdate) (*dom
 	if u.ZealotTicketID != nil {
 		book.ZealotTicketID = u.ZealotTicketID
 	}
+	if u.ISBN != nil {
+		book.Metadata.ISBN = *u.ISBN
+	}
+	if u.Publisher != nil {
+		book.Metadata.Publisher = *u.Publisher
+	}
+	if u.PublishedAt != nil {
+		book.Metadata.PublishedAt = u.PublishedAt
+	}
+	if u.Language != nil {
+		book.Metadata.Language = *u.Language
+	}
+	if u.Genres != nil {
+		book.Metadata.Genres = *u.Genres
+	}
+	if u.Tags != nil {
+		book.Metadata.Tags = *u.Tags
+	}
 	book.UpdatedAt = time.Now()
 
 	if err := s.books.Update(ctx, book); err != nil {
@@ -175,6 +200,16 @@ func (s *BookService) OpenFile(ctx context.Context, id string) (io.ReadCloser, *
 		return nil, nil, fmt.Errorf("open book file: %w", err)
 	}
 	return rc, book, nil
+}
+
+// ListAuthors returns all distinct authors with their book counts.
+func (s *BookService) ListAuthors(ctx context.Context) ([]repos.AuthorSummary, error) {
+	return s.books.ListAuthors(ctx)
+}
+
+// ListGenres returns all distinct genres with their book counts.
+func (s *BookService) ListGenres(ctx context.Context) ([]repos.GenreSummary, error) {
+	return s.books.ListGenres(ctx)
 }
 
 // OpenCover returns a reader for the book's cover image.

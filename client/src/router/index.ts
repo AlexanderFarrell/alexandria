@@ -24,6 +24,11 @@ const router = createRouter({
       name: 'reader',
       component: () => import('@/views/ReaderView.vue'),
     },
+    {
+      path: '/lists',
+      name: 'lists',
+      component: () => import('@/views/ListsView.vue'),
+    },
   ],
 })
 

@@ -12,6 +12,7 @@ type App struct {
 	Auth   *services.AuthService
 	Books  *services.BookService
 	Reader *services.ReaderService
+	Lists  *services.ListService
 }
 
 // New wires together all services with their dependencies.
@@ -19,6 +20,7 @@ func New(
 	userRepo repos.UserRepo,
 	bookRepo repos.BookRepo,
 	progressRepo repos.ProgressRepo,
+	listRepo repos.ListRepo,
 	store ports.FileStore,
 	parser ports.BookParser,
 	cfg *config.Config,
@@ -27,5 +29,6 @@ func New(
 		Auth:   services.NewAuthService(userRepo, cfg),
 		Books:  services.NewBookService(bookRepo, store, parser, cfg),
 		Reader: services.NewReaderService(progressRepo),
+		Lists:  services.NewListService(listRepo),
 	}
 }

@@ -27,6 +27,7 @@ export interface ReadingProgress {
   book_id: string
   cfi: string
   percentage: number
+  rating?: number // 1–5; absent means unrated
   zealot_progress_ref?: string
   started_at: string
   last_read_at: string
@@ -52,4 +53,29 @@ export interface BooksListResponse {
   total: number
   page: number
   limit: number
+}
+
+export interface AuthorSummary {
+  author: string
+  count: number
+}
+
+export interface GenreSummary {
+  genre: string
+  count: number
+}
+
+export interface BookList {
+  id: string
+  user_id: string
+  name: string
+  description: string
+  created_at: string
+  updated_at: string
+}
+
+export interface BookListItem {
+  list_id: string
+  book_id: string
+  added_at: string
 }

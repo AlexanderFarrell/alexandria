@@ -26,7 +26,7 @@ func Load() *Config {
 		JWTSecret:      getEnv("JWT_SECRET", "changeme-please-set-in-production"),
 		JWTExpiry:      getDuration("JWT_EXPIRY", 15*time.Minute),
 		RefreshExpiry:  getDuration("REFRESH_EXPIRY", 168*time.Hour),
-		UploadMaxBytes: getInt("UPLOAD_MAX_BYTES", 64*1024*1024),
+		UploadMaxBytes: getInt("UPLOAD_MAX_BYTES", 500*1024*1024),
 	}
 }
 

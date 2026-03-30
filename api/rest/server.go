@@ -43,8 +43,9 @@ func New(application *app.App, staticDir string, uploadMaxBytes int) *FiberServe
 	authH := handlers.NewAuthHandler(application.Auth)
 	bookH := handlers.NewBookHandler(application.Books)
 	readerH := handlers.NewReaderHandler(application.Reader)
+	listH := handlers.NewListHandler(application.Lists)
 
-	s.registerRoutes(authH, bookH, readerH)
+	s.registerRoutes(authH, bookH, readerH, listH)
 
 	// Serve the compiled Vue app for all non-API routes (SPA fallback)
 	if staticDir != "" {

@@ -33,12 +33,13 @@ func main() {
 	userRepo := sqlite.NewUserRepo(db)
 	bookRepo := sqlite.NewBookRepo(db)
 	progressRepo := sqlite.NewProgressRepo(db)
+	listRepo := sqlite.NewListRepo(db)
 
 	fileStore := storage.NewLocalFileStore(cfg.DataDir)
 	epubParser := epub.New()
 
 	// Application core
-	application := app.New(userRepo, bookRepo, progressRepo, fileStore, epubParser, cfg)
+	application := app.New(userRepo, bookRepo, progressRepo, listRepo, fileStore, epubParser, cfg)
 
 	// Determine static dir for SPA (client/dist if it exists)
 	staticDir := ""

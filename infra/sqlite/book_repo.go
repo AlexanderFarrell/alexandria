@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -52,8 +53,9 @@ func (r *bookRepo) List(ctx context.Context, filter repos.BookFilter) ([]*domain
 	if filter.Author != "" {
 		q = q.Where("author LIKE ?", "%"+filter.Author+"%")
 	}
+	// Use json_each for exact genre matching (SQLite 3.38+, which modernc.org/sqlite 1.23+ provides)
 	if filter.Genre != "" {
-		q = q.Where("meta_genres LIKE ?", "%"+filter.Genre+"%")
+		q = q.Where("EXISTS (SELECT 1 FROM json_each(meta_genres) WHERE value = ?)", filter.Genre)
 	}
 
 	var total int64
@@ -71,8 +73,32 @@ func (r *bookRepo) List(ctx context.Context, filter repos.BookFilter) ([]*domain
 	}
 	offset := (page - 1) * limit
 
+	// Build sort clause from allowlist to prevent injection
+	validSortCols := map[string]string{
+		"title":      "books.title",
+		"author":     "books.author",
+		"created_at": "books.created_at",
+		"rating":     "rp.rating",
+	}
+	col, ok := validSortCols[filter.SortBy]
+	if !ok {
+		col = "books.created_at"
+	}
+	dir := "DESC"
+	if strings.EqualFold(filter.SortOrder, "asc") {
+		dir = "ASC"
+	}
+
+	// When sorting by rating, LEFT JOIN reading_progress scoped to the requesting user
+	if col == "rp.rating" && filter.UserID != "" {
+		q = q.Joins("LEFT JOIN reading_progress rp ON rp.book_id = books.id AND rp.user_id = ?", filter.UserID)
+	} else if col == "rp.rating" {
+		// No user context — fall back to created_at
+		col = "books.created_at"
+	}
+
 	var models []BookModel
-	if err := q.Order("created_at DESC").Limit(limit).Offset(offset).Find(&models).Error; err != nil {
+	if err := q.Order(col + " " + dir).Limit(limit).Offset(offset).Find(&models).Error; err != nil {
 		return nil, 0, fmt.Errorf("list books: %w", err)
 	}
 
@@ -97,6 +123,31 @@ func (r *bookRepo) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("delete book: %w", err)
 	}
 	return nil
+}
+
+// ListAuthors returns distinct authors with book counts, ordered by count descending.
+func (r *bookRepo) ListAuthors(ctx context.Context) ([]repos.AuthorSummary, error) {
+	var results []repos.AuthorSummary
+	err := r.db.WithContext(ctx).Raw(
+		"SELECT author, COUNT(*) as count FROM books WHERE author != '' GROUP BY author ORDER BY count DESC",
+	).Scan(&results).Error
+	if err != nil {
+		return nil, fmt.Errorf("list authors: %w", err)
+	}
+	return results, nil
+}
+
+// ListGenres returns distinct genres with book counts using SQLite's json_each virtual table.
+// Requires SQLite 3.38+ (modernc.org/sqlite v1.23+ embeds SQLite 3.43).
+func (r *bookRepo) ListGenres(ctx context.Context) ([]repos.GenreSummary, error) {
+	var results []repos.GenreSummary
+	err := r.db.WithContext(ctx).Raw(
+		"SELECT value as genre, COUNT(*) as count FROM books, json_each(books.meta_genres) GROUP BY value ORDER BY count DESC",
+	).Scan(&results).Error
+	if err != nil {
+		return nil, fmt.Errorf("list genres: %w", err)
+	}
+	return results, nil
 }
 
 // --- mapping helpers ---

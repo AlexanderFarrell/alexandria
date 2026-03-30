@@ -5,6 +5,7 @@ import (
 	"io"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -23,12 +24,16 @@ func NewBookHandler(books *services.BookService) *BookHandler {
 
 // List handles GET /api/v1/books
 func (h *BookHandler) List(c *fiber.Ctx) error {
+	userID := middleware.UserID(c)
 	filter := repos.BookFilter{
-		Search: c.Query("search"),
-		Author: c.Query("author"),
-		Genre:  c.Query("genre"),
-		Page:   queryInt(c, "page", 1),
-		Limit:  queryInt(c, "limit", 20),
+		Search:    c.Query("search"),
+		Author:    c.Query("author"),
+		Genre:     c.Query("genre"),
+		UserID:    userID,
+		SortBy:    c.Query("sort_by"),
+		SortOrder: c.Query("sort_order"),
+		Page:      queryInt(c, "page", 1),
+		Limit:     queryInt(c, "limit", 20),
 	}
 
 	books, total, err := h.books.List(c.Context(), filter)
@@ -41,6 +46,24 @@ func (h *BookHandler) List(c *fiber.Ctx) error {
 		"page":  filter.Page,
 		"limit": filter.Limit,
 	})
+}
+
+// ListAuthors handles GET /api/v1/books/authors
+func (h *BookHandler) ListAuthors(c *fiber.Ctx) error {
+	authors, err := h.books.ListAuthors(c.Context())
+	if err != nil {
+		return respondErr(c, err)
+	}
+	return c.JSON(fiber.Map{"authors": authors})
+}
+
+// ListGenres handles GET /api/v1/books/genres
+func (h *BookHandler) ListGenres(c *fiber.Ctx) error {
+	genres, err := h.books.ListGenres(c.Context())
+	if err != nil {
+		return respondErr(c, err)
+	}
+	return c.JSON(fiber.Map{"genres": genres})
 }
 
 // Upload handles POST /api/v1/books (multipart form)
@@ -82,11 +105,21 @@ func (h *BookHandler) GetByID(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"book": book})
 }
 
+type updateBookMetadataRequest struct {
+	ISBN        *string    `json:"isbn"`
+	Publisher   *string    `json:"publisher"`
+	PublishedAt *time.Time `json:"published_at"`
+	Language    *string    `json:"language"`
+	Genres      *[]string  `json:"genres"`
+	Tags        *[]string  `json:"tags"`
+}
+
 type updateBookRequest struct {
-	Title          *string `json:"title"`
-	Author         *string `json:"author"`
-	Description    *string `json:"description"`
-	ZealotTicketID *string `json:"zealot_ticket_id"`
+	Title          *string                    `json:"title"`
+	Author         *string                    `json:"author"`
+	Description    *string                    `json:"description"`
+	ZealotTicketID *string                    `json:"zealot_ticket_id"`
+	Metadata       *updateBookMetadataRequest `json:"metadata"`
 }
 
 // Update handles PUT /api/v1/books/:id
@@ -96,12 +129,22 @@ func (h *BookHandler) Update(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
-	book, err := h.books.Update(c.Context(), c.Params("id"), services.BookUpdate{
+	u := services.BookUpdate{
 		Title:          req.Title,
 		Author:         req.Author,
 		Description:    req.Description,
 		ZealotTicketID: req.ZealotTicketID,
-	})
+	}
+	if req.Metadata != nil {
+		u.ISBN = req.Metadata.ISBN
+		u.Publisher = req.Metadata.Publisher
+		u.PublishedAt = req.Metadata.PublishedAt
+		u.Language = req.Metadata.Language
+		u.Genres = req.Metadata.Genres
+		u.Tags = req.Metadata.Tags
+	}
+
+	book, err := h.books.Update(c.Context(), c.Params("id"), u)
 	if err != nil {
 		return respondErr(c, err)
 	}

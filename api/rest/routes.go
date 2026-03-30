@@ -11,6 +11,7 @@ func (s *FiberServer) registerRoutes(
 	authH *handlers.AuthHandler,
 	bookH *handlers.BookHandler,
 	readerH *handlers.ReaderHandler,
+	listH *handlers.ListHandler,
 ) {
 	s.app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
@@ -32,6 +33,9 @@ func (s *FiberServer) registerRoutes(
 	books := protected.Group("/books")
 	books.Get("/", bookH.List)
 	books.Post("/", bookH.Upload)
+	// Named sub-routes must come before /:id to avoid being matched as an ID
+	books.Get("/authors", bookH.ListAuthors)
+	books.Get("/genres", bookH.ListGenres)
 	books.Get("/:id", bookH.GetByID)
 	books.Put("/:id", bookH.Update)
 	books.Delete("/:id", bookH.Delete)
@@ -39,4 +43,14 @@ func (s *FiberServer) registerRoutes(
 	books.Get("/:id/cover", bookH.ServeCover)
 	books.Get("/:id/progress", readerH.GetProgress)
 	books.Put("/:id/progress", readerH.SaveProgress)
+
+	lists := protected.Group("/lists")
+	lists.Get("/", listH.ListLists)
+	lists.Post("/", listH.CreateList)
+	lists.Get("/:id", listH.GetList)
+	lists.Put("/:id", listH.UpdateList)
+	lists.Delete("/:id", listH.DeleteList)
+	lists.Get("/:id/books", listH.ListItems)
+	lists.Post("/:id/books", listH.AddBook)
+	lists.Delete("/:id/books/:bookId", listH.RemoveBook)
 }

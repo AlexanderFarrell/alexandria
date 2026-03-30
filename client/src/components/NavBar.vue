@@ -1,6 +1,10 @@
 <template>
   <nav class="navbar">
     <router-link to="/library" class="brand">Alexandria</router-link>
+    <div class="nav-links">
+      <router-link to="/library" class="nav-link">Library</router-link>
+      <router-link to="/lists" class="nav-link">Lists</router-link>
+    </div>
     <div class="nav-actions">
       <button class="btn-ghost" @click="logout">Sign out</button>
     </div>
@@ -40,4 +44,19 @@ function logout() {
   letter-spacing: 0.04em;
   text-decoration: none;
 }
+.nav-links {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: 1.5rem;
+}
+.nav-link {
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.15s, background 0.15s;
+}
+.nav-link:hover { color: var(--text); text-decoration: none; }
+.nav-link.router-link-active { color: var(--accent); background: var(--surface-hover); }
 </style>

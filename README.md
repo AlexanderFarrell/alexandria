@@ -51,6 +51,7 @@ All config is via environment variables:
 | `JWT_SECRET` | `changeme-set-in-production` | **Change this before deploying** |
 | `JWT_EXPIRY` | `15m` | Access token lifetime |
 | `REFRESH_EXPIRY` | `168h` | Refresh token lifetime (7 days) |
+| `UPLOAD_MAX_BYTES` | `524288000` | Maximum request body size for book uploads (500 MiB) |
 
 ---
 
