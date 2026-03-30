@@ -1,0 +1,15 @@
+services:
+  server:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      PORT: "8080"
+      DATA_DIR: /data
+      DB_PATH: /data/alexandria.db
+      JWT_SECRET: ${JWT_SECRET:-changeme-set-in-production}
+      JWT_EXPIRY: "15m"
+      REFRESH_EXPIRY: "168h"
+    restart: unless-stopped
