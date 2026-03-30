@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { hasStoredSession } from '@/utils/auth'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -35,6 +36,7 @@ const router = createRouter({
 // Guard: redirect to /login if not authenticated
 router.beforeEach((to) => {
   const auth = useAuthStore()
+  auth.isAuthenticated = hasStoredSession()
   if (!to.meta.public && !auth.isAuthenticated) {
     return { name: 'login' }
   }

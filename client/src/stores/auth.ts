@@ -1,34 +1,30 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as authApi from '@/api/auth'
-import type { User, Tokens } from '@/types'
+import type { User } from '@/types'
+import { clearStoredSession, hasStoredSession, storeTokens } from '@/utils/auth'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
-  const isAuthenticated = ref(!!localStorage.getItem('access_token'))
-
-  function storeTokens(tokens: Tokens) {
-    localStorage.setItem('access_token', tokens.access_token)
-    localStorage.setItem('refresh_token', tokens.refresh_token)
-    isAuthenticated.value = true
-  }
+  const isAuthenticated = ref(hasStoredSession())
 
   async function login(username: string, password: string) {
     const res = await authApi.login(username, password)
     user.value = res.user
     storeTokens(res.tokens)
+    isAuthenticated.value = true
   }
 
   async function register(username: string, password: string) {
     const res = await authApi.register(username, password)
     user.value = res.user
     storeTokens(res.tokens)
+    isAuthenticated.value = true
   }
 
   function logout() {
     user.value = null
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
+    clearStoredSession()
     isAuthenticated.value = false
   }
 
