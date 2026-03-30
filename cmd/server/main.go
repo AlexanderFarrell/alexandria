@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"alexandria/app"
 	"alexandria/api/rest"
+	"alexandria/app"
 	"alexandria/config"
 	"alexandria/infra/epub"
 	"alexandria/infra/sqlite"
@@ -47,7 +47,7 @@ func main() {
 	}
 
 	// HTTP server
-	server := rest.New(application, staticDir)
+	server := rest.New(application, staticDir, cfg.UploadMaxBytes)
 
 	// Graceful shutdown
 	quit := make(chan os.Signal, 1)

@@ -18,8 +18,9 @@ type FiberServer struct {
 }
 
 // New builds and configures the Fiber application.
-func New(application *app.App, staticDir string) *FiberServer {
+func New(application *app.App, staticDir string, uploadMaxBytes int) *FiberServer {
 	f := fiber.New(fiber.Config{
+		BodyLimit: uploadMaxBytes,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {
