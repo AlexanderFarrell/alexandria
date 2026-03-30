@@ -16,11 +16,21 @@ func (s *FiberServer) registerRoutes(
 	s.app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
+	s.app.Get("/readyz", func(c *fiber.Ctx) error {
+		if s.readinessCheck == nil {
+			return c.JSON(fiber.Map{"status": "ready"})
+		}
+		if err := s.readinessCheck(); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "not ready"})
+		}
+		return c.JSON(fiber.Map{"status": "ready"})
+	})
 
 	v1 := s.app.Group("/api/v1")
 
 	// Auth — no middleware
 	auth := v1.Group("/auth")
+	auth.Get("/status", authH.Status)
 	auth.Post("/register", authH.Register)
 	auth.Post("/login", authH.Login)
 	auth.Post("/refresh", authH.Refresh)

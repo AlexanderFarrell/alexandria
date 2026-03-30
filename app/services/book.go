@@ -1,7 +1,10 @@
 package services
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -67,9 +70,18 @@ func (s *BookService) Upload(ctx context.Context, input UploadInput) (*domain.Bo
 		return nil, fmt.Errorf("%w: %s", domain.ErrBadRequest, err)
 	}
 
+	buffered := bufio.NewReader(input.Content)
+	header, err := buffered.Peek(8)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("inspect file: %w", err)
+	}
+	if err := validateFileSignature(fileType, header); err != nil {
+		return nil, fmt.Errorf("%w: %s", domain.ErrBadRequest, err)
+	}
+
 	// Save the raw file to storage
 	filePath := filepath.Join("books", id, "original"+ext)
-	if err := s.store.Save(ctx, filePath, input.Content); err != nil {
+	if err := s.store.Save(ctx, filePath, buffered); err != nil {
 		return nil, fmt.Errorf("save file: %w", err)
 	}
 
@@ -197,6 +209,9 @@ func (s *BookService) OpenFile(ctx context.Context, id string) (io.ReadCloser, *
 	}
 	rc, err := s.store.Open(ctx, book.FilePath)
 	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, nil, domain.ErrNotFound
+		}
 		return nil, nil, fmt.Errorf("open book file: %w", err)
 	}
 	return rc, book, nil
@@ -221,7 +236,14 @@ func (s *BookService) OpenCover(ctx context.Context, id string) (io.ReadCloser, 
 	if book.CoverPath == "" {
 		return nil, domain.ErrNotFound
 	}
-	return s.store.Open(ctx, book.CoverPath)
+	rc, err := s.store.Open(ctx, book.CoverPath)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, fmt.Errorf("open cover: %w", err)
+	}
+	return rc, nil
 }
 
 func extToFileType(ext string) (domain.FileType, error) {
@@ -232,5 +254,24 @@ func extToFileType(ext string) (domain.FileType, error) {
 		return domain.FileTypePDF, nil
 	default:
 		return "", fmt.Errorf("unsupported file type %q; accepted: .epub, .pdf", ext)
+	}
+}
+
+func validateFileSignature(fileType domain.FileType, header []byte) error {
+	switch fileType {
+	case domain.FileTypeEPUB:
+		if bytes.HasPrefix(header, []byte("PK\x03\x04")) ||
+			bytes.HasPrefix(header, []byte("PK\x05\x06")) ||
+			bytes.HasPrefix(header, []byte("PK\x07\x08")) {
+			return nil
+		}
+		return fmt.Errorf("file contents do not match the .epub extension")
+	case domain.FileTypePDF:
+		if bytes.HasPrefix(header, []byte("%PDF-")) {
+			return nil
+		}
+		return fmt.Errorf("file contents do not match the .pdf extension")
+	default:
+		return nil
 	}
 }

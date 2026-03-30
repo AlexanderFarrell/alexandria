@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -22,6 +23,12 @@ type Tokens struct {
 	ExpiresIn    int64  `json:"expires_in"` // seconds until access token expires
 }
 
+// RegistrationStatus describes whether self-service registration is currently available.
+type RegistrationStatus struct {
+	RegistrationMode config.RegistrationMode `json:"registration_mode"`
+	CanRegister      bool                    `json:"can_register"`
+}
+
 type accessClaims struct {
 	jwt.RegisteredClaims
 	UserID string `json:"uid"`
@@ -35,23 +42,69 @@ type refreshClaims struct {
 
 // AuthService handles registration, login, and token lifecycle.
 type AuthService struct {
-	users  repos.UserRepo
-	secret []byte
-	access time.Duration
-	refresh time.Duration
+	users            repos.UserRepo
+	secret           []byte
+	access           time.Duration
+	refresh          time.Duration
+	registrationMode config.RegistrationMode
+	registerMu       sync.Mutex
 }
 
 func NewAuthService(users repos.UserRepo, cfg *config.Config) *AuthService {
-	return &AuthService{
-		users:   users,
-		secret:  []byte(cfg.JWTSecret),
-		access:  cfg.JWTExpiry,
-		refresh: cfg.RefreshExpiry,
+	mode := cfg.RegistrationMode
+	if mode == "" {
+		mode = config.RegistrationModeSingle
 	}
+	return &AuthService{
+		users:            users,
+		secret:           []byte(cfg.JWTSecret),
+		access:           cfg.JWTExpiry,
+		refresh:          cfg.RefreshExpiry,
+		registrationMode: mode,
+	}
+}
+
+// ValidateStartup checks that the configured registration mode is compatible with persisted state.
+func (s *AuthService) ValidateStartup(ctx context.Context) error {
+	if s.registrationMode != config.RegistrationModeSingle {
+		return nil
+	}
+
+	count, err := s.users.Count(ctx)
+	if err != nil {
+		return fmt.Errorf("count users: %w", err)
+	}
+	if count > 1 {
+		return fmt.Errorf("registration mode %q requires at most one existing user, found %d", s.registrationMode, count)
+	}
+	return nil
+}
+
+// RegistrationStatus reports the current registration mode and whether account creation is available.
+func (s *AuthService) RegistrationStatus(ctx context.Context) (*RegistrationStatus, error) {
+	return s.registrationStatus(ctx)
 }
 
 // Register creates a new user account and returns tokens.
 func (s *AuthService) Register(ctx context.Context, username, password string) (*domain.User, *Tokens, error) {
+	s.registerMu.Lock()
+	defer s.registerMu.Unlock()
+
+	status, err := s.registrationStatus(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !status.CanRegister {
+		switch status.RegistrationMode {
+		case config.RegistrationModeDisable:
+			return nil, nil, fmt.Errorf("%w: registration is disabled", domain.ErrForbidden)
+		case config.RegistrationModeSingle:
+			return nil, nil, fmt.Errorf("%w: owner account already exists", domain.ErrForbidden)
+		default:
+			return nil, nil, fmt.Errorf("%w: registration is unavailable", domain.ErrForbidden)
+		}
+	}
+
 	if username == "" || password == "" {
 		return nil, nil, fmt.Errorf("%w: username and password are required", domain.ErrBadRequest)
 	}
@@ -59,7 +112,7 @@ func (s *AuthService) Register(ctx context.Context, username, password string) (
 		return nil, nil, fmt.Errorf("%w: password must be at least 8 characters", domain.ErrBadRequest)
 	}
 
-	_, err := s.users.GetByUsername(ctx, username)
+	_, err = s.users.GetByUsername(ctx, username)
 	if err == nil {
 		return nil, nil, fmt.Errorf("%w: username already taken", domain.ErrConflict)
 	}
@@ -191,4 +244,33 @@ func (s *AuthService) issueTokens(userID string) (*Tokens, error) {
 		RefreshToken: refreshStr,
 		ExpiresIn:    int64(s.access.Seconds()),
 	}, nil
+}
+
+func (s *AuthService) registrationStatus(ctx context.Context) (*RegistrationStatus, error) {
+	switch s.registrationMode {
+	case config.RegistrationModeDisable:
+		return &RegistrationStatus{
+			RegistrationMode: s.registrationMode,
+			CanRegister:      false,
+		}, nil
+	case config.RegistrationModeMulti:
+		return &RegistrationStatus{
+			RegistrationMode: s.registrationMode,
+			CanRegister:      true,
+		}, nil
+	case config.RegistrationModeSingle:
+		count, err := s.users.Count(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("count users: %w", err)
+		}
+		if count > 1 {
+			return nil, fmt.Errorf("registration mode %q requires at most one existing user, found %d", s.registrationMode, count)
+		}
+		return &RegistrationStatus{
+			RegistrationMode: s.registrationMode,
+			CanRegister:      count == 0,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported registration mode %q", s.registrationMode)
+	}
 }

@@ -48,6 +48,11 @@ export interface Tokens {
   expires_in: number
 }
 
+export interface AuthStatus {
+  registration_mode: 'disable' | 'single' | 'multi'
+  can_register: boolean
+}
+
 export interface BooksListResponse {
   books: Book[]
   total: number

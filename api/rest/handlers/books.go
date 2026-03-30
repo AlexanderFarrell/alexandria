@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"bufio"
 	"fmt"
 	"io"
+	"net/http"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -16,6 +18,11 @@ import (
 
 type BookHandler struct {
 	books *services.BookService
+}
+
+type readCloserStream struct {
+	io.Reader
+	io.Closer
 }
 
 func NewBookHandler(books *services.BookService) *BookHandler {
@@ -159,17 +166,11 @@ func (h *BookHandler) Delete(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"message": "deleted"})
 }
 
-// ServeContent handles GET /api/v1/books/:id/content
-// Reads the book file into memory then sends it — avoids the defer-close/lazy-read race in Fiber.
+// ServeContent handles GET /api/v1/books/:id/content.
 func (h *BookHandler) ServeContent(c *fiber.Ctx) error {
 	rc, book, err := h.books.OpenFile(c.Context(), c.Params("id"))
 	if err != nil {
 		return respondErr(c, err)
-	}
-	data, err := io.ReadAll(rc)
-	rc.Close()
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to read file"})
 	}
 
 	contentType := "application/octet-stream"
@@ -182,7 +183,7 @@ func (h *BookHandler) ServeContent(c *fiber.Ctx) error {
 
 	c.Set("Content-Type", contentType)
 	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(book.FilePath)))
-	return c.Send(data)
+	return c.SendStream(rc)
 }
 
 // ServeCover handles GET /api/v1/books/:id/cover
@@ -191,13 +192,15 @@ func (h *BookHandler) ServeCover(c *fiber.Ctx) error {
 	if err != nil {
 		return respondErr(c, err)
 	}
-	data, err := io.ReadAll(rc)
-	rc.Close()
-	if err != nil {
+
+	buffered := bufio.NewReader(rc)
+	header, err := buffered.Peek(512)
+	if err != nil && err != io.EOF {
+		rc.Close()
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to read cover"})
 	}
-	c.Set("Content-Type", "image/jpeg")
-	return c.Send(data)
+	c.Set("Content-Type", http.DetectContentType(header))
+	return c.SendStream(readCloserStream{Reader: buffered, Closer: rc})
 }
 
 func queryInt(c *fiber.Ctx, key string, def int) int {

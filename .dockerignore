@@ -1,0 +1,11 @@
+.git
+.gitignore
+data
+bin
+server
+client/node_modules
+client/dist
+test
+docs/previous-plans-from-ai
+__pycache__
+.pytest_cache

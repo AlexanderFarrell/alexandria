@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"alexandria/app/ports"
+	"alexandria/domain"
 )
 
 type localFileStore struct {
@@ -40,7 +41,7 @@ func (s *localFileStore) Open(_ context.Context, path string) (io.ReadCloser, er
 	f, err := os.Open(full)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("file not found: %s", path)
+			return nil, domain.ErrNotFound
 		}
 		return nil, fmt.Errorf("open file: %w", err)
 	}

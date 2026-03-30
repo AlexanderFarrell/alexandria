@@ -9,7 +9,10 @@ services:
       PORT: "8080"
       DATA_DIR: /data
       DB_PATH: /data/alexandria.db
-      JWT_SECRET: ${JWT_SECRET:-changeme-set-in-production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       JWT_EXPIRY: "15m"
       REFRESH_EXPIRY: "168h"
+      REGISTRATION_MODE: ${REGISTRATION_MODE:-single}
+      UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-104857600}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-}
     restart: unless-stopped

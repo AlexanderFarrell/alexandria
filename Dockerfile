@@ -16,11 +16,13 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o server ./cmd/server
 
 # Stage 3: Minimal runtime image
-FROM alpine:latest
+FROM alpine:3.20
 RUN apk --no-cache add ca-certificates tzdata
+RUN addgroup -S alexandria && adduser -S -D -H -u 10001 -G alexandria alexandria
 WORKDIR /app
 COPY --from=backend /app/server .
 COPY --from=frontend /app/client/dist ./client/dist
+RUN mkdir -p /data && chown alexandria:alexandria /data
 
 EXPOSE 8080
 ENV PORT=8080 \
@@ -28,5 +30,6 @@ ENV PORT=8080 \
     DB_PATH=/data/alexandria.db
 
 VOLUME ["/data"]
+USER alexandria:alexandria
 
 CMD ["./server"]

@@ -27,7 +27,7 @@ function setAuthorizationHeader(config: InternalAxiosRequestConfig, token: strin
 }
 
 function isPublicAuthRequest(url?: string): boolean {
-  return url === '/auth/login' || url === '/auth/register'
+  return url === '/auth/login' || url === '/auth/register' || url === '/auth/status'
 }
 
 function isRefreshRequest(url?: string): boolean {

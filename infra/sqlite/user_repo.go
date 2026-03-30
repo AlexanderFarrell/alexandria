@@ -35,6 +35,14 @@ func (r *userRepo) Create(ctx context.Context, user *domain.User) error {
 	return nil
 }
 
+func (r *userRepo) Count(ctx context.Context) (int64, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&UserModel{}).Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("count users: %w", err)
+	}
+	return count, nil
+}
+
 func (r *userRepo) GetByID(ctx context.Context, id string) (*domain.User, error) {
 	var m UserModel
 	err := r.db.WithContext(ctx).First(&m, "id = ?", id).Error

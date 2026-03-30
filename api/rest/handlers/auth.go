@@ -2,11 +2,12 @@ package handlers
 
 import (
 	"errors"
+	"log"
 
 	"github.com/gofiber/fiber/v2"
 
-	"alexandria/app/services"
 	"alexandria/api/rest/middleware"
+	"alexandria/app/services"
 	"alexandria/domain"
 )
 
@@ -21,6 +22,15 @@ func NewAuthHandler(auth *services.AuthService) *AuthHandler {
 type registerRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+// Status handles GET /api/v1/auth/status
+func (h *AuthHandler) Status(c *fiber.Ctx) error {
+	status, err := h.auth.RegistrationStatus(c.Context())
+	if err != nil {
+		return respondErr(c, err)
+	}
+	return c.JSON(status)
 }
 
 // Register handles POST /api/v1/auth/register
@@ -89,6 +99,7 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 // respondErr maps domain errors to HTTP status codes.
 func respondErr(c *fiber.Ctx, err error) error {
 	status := fiber.StatusInternalServerError
+	message := "internal server error"
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		status = fiber.StatusNotFound
@@ -101,5 +112,10 @@ func respondErr(c *fiber.Ctx, err error) error {
 	case errors.Is(err, domain.ErrBadRequest):
 		status = fiber.StatusBadRequest
 	}
-	return c.Status(status).JSON(fiber.Map{"error": err.Error()})
+	if status < fiber.StatusInternalServerError {
+		message = err.Error()
+	} else {
+		log.Printf("request error: %s %s: %v", c.Method(), c.OriginalURL(), err)
+	}
+	return c.Status(status).JSON(fiber.Map{"error": message})
 }

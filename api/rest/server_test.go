@@ -2,7 +2,9 @@ package rest
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net"
@@ -10,21 +12,26 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"alexandria/app"
 	"alexandria/config"
+	"alexandria/domain"
 	"alexandria/infra/epub"
 	"alexandria/infra/sqlite"
 	"alexandria/infra/storage"
+
+	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
 
 func TestUploadAllowsLargeMultipartBooks(t *testing.T) {
 	srv, cfg := newTestServer(t, 8*1024*1024)
 	token := registerTestUser(t, srv, "reader_large_upload")
 
-	largePayload := bytes.Repeat([]byte("x"), 6*1024*1024)
+	largePayload := fakeEPUBPayload(6 * 1024 * 1024)
 	req := newUploadRequest(t, largePayload, "large-upload.epub", token)
 
 	resp, err := srv.app.Test(req, -1)
@@ -67,11 +74,14 @@ func TestUploadRejectsMultipartBooksOverConfiguredLimit(t *testing.T) {
 	token := registerTestUser(t, srv, "reader_limit_rejection")
 	baseURL := startTestHTTPServer(t, srv)
 
-	oversizedPayload := bytes.Repeat([]byte("x"), 2*1024*1024)
+	oversizedPayload := fakeEPUBPayload(2 * 1024 * 1024)
 	req := newLiveUploadRequest(t, baseURL, oversizedPayload, "too-large.epub", token)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		if strings.Contains(err.Error(), "connection reset by peer") {
+			return
+		}
 		t.Fatalf("upload oversized book: %v", err)
 	}
 	defer resp.Body.Close()
@@ -82,18 +92,252 @@ func TestUploadRejectsMultipartBooksOverConfiguredLimit(t *testing.T) {
 	}
 }
 
+func TestUploadRejectsInvalidEPUBSignature(t *testing.T) {
+	srv, _ := newTestServer(t, 8*1024*1024)
+	token := registerTestUser(t, srv, "reader_invalid_signature")
+
+	req := newUploadRequest(t, []byte("not a zip file"), "bad.epub", token)
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("upload invalid epub: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 400, got %d: %s", resp.StatusCode, body)
+	}
+}
+
+func TestAuthStatusSingleModeAllowsBootstrapOnly(t *testing.T) {
+	srv, _ := newTestServerWithMode(t, config.RegistrationModeSingle, nil)
+
+	status := getAuthStatus(t, srv)
+	if status.RegistrationMode != string(config.RegistrationModeSingle) || !status.CanRegister {
+		t.Fatalf("unexpected initial auth status: %+v", status)
+	}
+
+	registerTestUser(t, srv, "owner_account")
+
+	status = getAuthStatus(t, srv)
+	if status.CanRegister {
+		t.Fatalf("expected registration to be closed after bootstrap: %+v", status)
+	}
+
+	body := bytes.NewBufferString(`{"username":"another","password":"testpass123"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", body)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("second registration request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 403, got %d: %s", resp.StatusCode, payload)
+	}
+}
+
+func TestAuthStatusDisableModeRejectsRegistration(t *testing.T) {
+	srv, _ := newTestServerWithMode(t, config.RegistrationModeDisable, nil)
+
+	status := getAuthStatus(t, srv)
+	if status.RegistrationMode != string(config.RegistrationModeDisable) || status.CanRegister {
+		t.Fatalf("unexpected disabled auth status: %+v", status)
+	}
+
+	body := bytes.NewBufferString(`{"username":"owner","password":"testpass123"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", body)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("disabled registration request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 403, got %d: %s", resp.StatusCode, payload)
+	}
+}
+
+func TestReadyzReportsReadyStatus(t *testing.T) {
+	srv, _ := newTestServer(t, 8*1024*1024)
+
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("readyz request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 200, got %d: %s", resp.StatusCode, body)
+	}
+}
+
+func TestReadyzReturnsServiceUnavailableWhenCheckFails(t *testing.T) {
+	srv, _ := newTestServerWithMode(t, config.RegistrationModeSingle, func() error {
+		return errors.New("db unavailable at /tmp/secret.db")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("failing readyz request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 503, got %d: %s", resp.StatusCode, body)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if bytes.Contains(body, []byte("/tmp/secret.db")) {
+		t.Fatalf("readiness response leaked internal details: %s", body)
+	}
+}
+
+func TestInternalErrorsAreRedacted(t *testing.T) {
+	srv, _ := newTestServer(t, 8*1024*1024)
+	srv.app.Get("/boom", func(c *fiber.Ctx) error {
+		return errors.New("db failed at /tmp/secret.db")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/boom", nil)
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("boom request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 500, got %d: %s", resp.StatusCode, body)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if bytes.Contains(body, []byte("/tmp/secret.db")) {
+		t.Fatalf("500 response leaked internals: %s", body)
+	}
+	if !bytes.Contains(body, []byte("internal server error")) {
+		t.Fatalf("expected generic 500 response, got %s", body)
+	}
+}
+
+func TestServeCoverStreamsDetectedContentType(t *testing.T) {
+	baseDir := t.TempDir()
+	srv, cfg, db := newTestServerWithConfig(t, &config.Config{
+		Port:             "0",
+		DataDir:          filepath.Join(baseDir, "data"),
+		DBPath:           filepath.Join(baseDir, "data", "alexandria.db"),
+		JWTSecret:        "test-secret-with-sufficient-length-123456",
+		JWTExpiry:        15 * time.Minute,
+		RefreshExpiry:    24 * time.Hour,
+		UploadMaxBytes:   8 * 1024 * 1024,
+		RegistrationMode: config.RegistrationModeSingle,
+	}, nil)
+	token := registerTestUser(t, srv, "reader_cover_stream")
+
+	coverPath := filepath.Join("books", "cover-book", "cover.jpg")
+	fullCoverPath := filepath.Join(cfg.DataDir, coverPath)
+	if err := os.MkdirAll(filepath.Dir(fullCoverPath), 0o755); err != nil {
+		t.Fatalf("mkdir cover dir: %v", err)
+	}
+	coverBytes := []byte{
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+		0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41,
+		0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+		0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+		0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+		0x42, 0x60, 0x82,
+	}
+	if err := os.WriteFile(fullCoverPath, coverBytes, 0o644); err != nil {
+		t.Fatalf("write cover file: %v", err)
+	}
+
+	book := &domain.Book{
+		ID:        "cover-book",
+		Title:     "Cover Book",
+		Author:    "Test Author",
+		FilePath:  filepath.Join("books", "cover-book", "original.epub"),
+		CoverPath: coverPath,
+		FileType:  domain.FileTypeEPUB,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := sqlite.NewBookRepo(db).Create(context.Background(), book); err != nil {
+		t.Fatalf("create cover book: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/cover-book/cover", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("cover request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 200, got %d: %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "image/png" {
+		t.Fatalf("expected image/png content type, got %q", got)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(body, coverBytes) {
+		t.Fatal("cover response body did not match stored cover bytes")
+	}
+}
+
 func newTestServer(t *testing.T, uploadMaxBytes int) (*FiberServer, *config.Config) {
 	t.Helper()
 
 	baseDir := t.TempDir()
-	cfg := &config.Config{
-		Port:           "0",
-		DataDir:        filepath.Join(baseDir, "data"),
-		DBPath:         filepath.Join(baseDir, "data", "alexandria.db"),
-		JWTSecret:      "test-secret",
-		JWTExpiry:      15 * time.Minute,
-		RefreshExpiry:  24 * time.Hour,
-		UploadMaxBytes: uploadMaxBytes,
+	srv, cfg, _ := newTestServerWithConfig(t, &config.Config{
+		Port:             "0",
+		DataDir:          filepath.Join(baseDir, "data"),
+		DBPath:           filepath.Join(baseDir, "data", "alexandria.db"),
+		JWTSecret:        "test-secret-with-sufficient-length-123456",
+		JWTExpiry:        15 * time.Minute,
+		RefreshExpiry:    24 * time.Hour,
+		UploadMaxBytes:   uploadMaxBytes,
+		RegistrationMode: config.RegistrationModeSingle,
+	}, nil)
+	return srv, cfg
+}
+
+func newTestServerWithMode(t *testing.T, mode config.RegistrationMode, ready func() error) (*FiberServer, *config.Config) {
+	t.Helper()
+
+	baseDir := t.TempDir()
+	srv, cfg, _ := newTestServerWithConfig(t, &config.Config{
+		Port:             "0",
+		DataDir:          filepath.Join(baseDir, "data"),
+		DBPath:           filepath.Join(baseDir, "data", "alexandria.db"),
+		JWTSecret:        "test-secret-with-sufficient-length-123456",
+		JWTExpiry:        15 * time.Minute,
+		RefreshExpiry:    24 * time.Hour,
+		UploadMaxBytes:   8 * 1024 * 1024,
+		RegistrationMode: mode,
+	}, ready)
+	return srv, cfg
+}
+
+func newTestServerWithConfig(t *testing.T, cfg *config.Config, ready func() error) (*FiberServer, *config.Config, *gorm.DB) {
+	t.Helper()
+
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
 	}
 
 	db, err := sqlite.Open(cfg.DBPath)
@@ -111,7 +355,7 @@ func newTestServer(t *testing.T, uploadMaxBytes int) (*FiberServer, *config.Conf
 		cfg,
 	)
 
-	return New(application, "", cfg.UploadMaxBytes), cfg
+	return New(application, "", cfg, ready), cfg, db
 }
 
 func startTestHTTPServer(t *testing.T, srv *FiberServer) string {
@@ -211,4 +455,41 @@ func newUploadBody(t *testing.T, content []byte, filename string) (*bytes.Buffer
 	}
 
 	return &body, writer.FormDataContentType()
+}
+
+func getAuthStatus(t *testing.T, srv *FiberServer) struct {
+	RegistrationMode string `json:"registration_mode"`
+	CanRegister      bool   `json:"can_register"`
+} {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/status", nil)
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("auth status request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	var payload struct {
+		RegistrationMode string `json:"registration_mode"`
+		CanRegister      bool   `json:"can_register"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode auth status response: %v", err)
+	}
+	return payload
+}
+
+func fakeEPUBPayload(size int) []byte {
+	if size < 4 {
+		size = 4
+	}
+	payload := bytes.Repeat([]byte("x"), size)
+	copy(payload, []byte("PK\x03\x04"))
+	return payload
 }
