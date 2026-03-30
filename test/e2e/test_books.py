@@ -1,10 +1,13 @@
 """E2E tests for book library endpoints."""
 
 import io
+import os
 import zipfile
 
 import httpx
 import pytest
+
+REAL_EPUB = os.path.join(os.path.dirname(__file__), "..", "97thingseveryapplicationsecurityprofessionalshouldknow.epub")
 
 
 def make_minimal_epub(title: str = "Test Book", author: str = "Test Author") -> bytes:
@@ -36,7 +39,7 @@ def make_minimal_epub(title: str = "Test Book", author: str = "Test Author") -> 
     return buf.getvalue()
 
 
-def test_list_books_empty(auth_client: httpx.Client):
+def test_list_books(auth_client: httpx.Client):
     r = auth_client.get("/api/v1/books")
     assert r.status_code == 200
     data = r.json()
@@ -101,6 +104,19 @@ def test_delete_book(auth_client: httpx.Client):
 
     r2 = auth_client.get(f"/api/v1/books/{book_id}")
     assert r2.status_code == 404
+
+
+@pytest.mark.skipif(not os.path.exists(REAL_EPUB), reason="real epub fixture not present")
+def test_upload_real_epub(auth_client: httpx.Client):
+    with open(REAL_EPUB, "rb") as f:
+        r = auth_client.post(
+            "/api/v1/books",
+            files={"file": (os.path.basename(REAL_EPUB), f, "application/epub+zip")},
+        )
+    assert r.status_code == 201, r.text
+    book = r.json()["book"]
+    assert book["file_type"] == "epub"
+    assert book["title"] != ""
 
 
 def test_upload_unsupported_type(auth_client: httpx.Client):
