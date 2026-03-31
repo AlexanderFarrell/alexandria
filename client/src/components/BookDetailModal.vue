@@ -83,6 +83,12 @@
         <button class="btn-danger" @click="onDelete">Delete</button>
         <div class="right-actions">
           <button class="btn-ghost" @click="$emit('add-to-list', book)">+ Add to list</button>
+          <button
+            v-if="book.file_type !== 'url'"
+            class="btn-ghost"
+            :disabled="refreshing"
+            @click="onRefreshMetadata"
+          >{{ refreshing ? 'Refreshing…' : 'Refresh metadata' }}</button>
           <button class="btn-ghost" @click="$emit('edit', book)">Edit</button>
           <button class="btn-primary" @click="$emit('open-reader', book)">Read →</button>
         </div>
@@ -114,6 +120,7 @@ const emit = defineEmits<{
 const booksStore = useBooksStore()
 
 const localRating = ref<number | undefined>(props.progress?.rating)
+const refreshing = ref(false)
 
 watch(() => props.progress?.rating, (val) => {
   localRating.value = val
@@ -132,6 +139,15 @@ const initials = computed(() => {
 async function onRate(n: number) {
   localRating.value = n
   await booksStore.rateBook(props.book.id, n)
+}
+
+async function onRefreshMetadata() {
+  refreshing.value = true
+  try {
+    await booksStore.refreshBookMetadata(props.book.id)
+  } finally {
+    refreshing.value = false
+  }
 }
 
 async function onDelete() {
@@ -308,5 +324,13 @@ function formatDate(iso: string) {
   display: flex;
   gap: 0.75rem;
   align-items: center;
+}
+
+@media (max-width: 600px) {
+  .modal-body { flex-direction: column; padding: 1rem; gap: 1rem; }
+  .left-col { flex-direction: row; width: 100%; gap: 1rem; align-items: flex-start; }
+  .cover-wrap { width: 90px; flex-shrink: 0; }
+  .modal-actions { flex-wrap: wrap; padding: 0.75rem 1rem; gap: 0.5rem; }
+  .right-actions { flex-wrap: wrap; gap: 0.5rem; }
 }
 </style>

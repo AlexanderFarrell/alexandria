@@ -43,6 +43,15 @@ func New(application *app.App, staticDir string, cfg *config.Config, readinessCh
 
 	f.Use(recover.New())
 	f.Use(logger.New())
+	// Log response body for any error response so the cause appears alongside the status line.
+	f.Use(func(c *fiber.Ctx) error {
+		chainErr := c.Next()
+		if status := c.Response().StatusCode(); status >= 400 {
+			log.Printf("error detail: %s %s -> %d: %s",
+				c.Method(), c.OriginalURL(), status, c.Response().Body())
+		}
+		return chainErr
+	})
 	f.Use(func(c *fiber.Ctx) error {
 		c.Set("X-Content-Type-Options", "nosniff")
 		c.Set("X-Frame-Options", "DENY")
@@ -67,8 +76,9 @@ func New(application *app.App, staticDir string, cfg *config.Config, readinessCh
 	bookH := handlers.NewBookHandler(application.Books)
 	readerH := handlers.NewReaderHandler(application.Reader)
 	listH := handlers.NewListHandler(application.Lists)
+	metadataH := handlers.NewMetadataHandler(application.Metadata)
 
-	s.registerRoutes(authH, bookH, readerH, listH)
+	s.registerRoutes(authH, bookH, readerH, listH, metadataH)
 
 	// Serve the compiled Vue app for all non-API routes (SPA fallback)
 	if staticDir != "" {

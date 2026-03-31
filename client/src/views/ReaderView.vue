@@ -116,6 +116,25 @@
         <button class="btn-ghost" @click="$router.back()">← Back to Library</button>
       </div>
 
+      <div v-else-if="book && book.file_type === 'pdf'" class="pdf-viewer">
+        <iframe
+          v-if="pdfBlobUrl"
+          :src="pdfBlobUrl"
+          class="pdf-iframe"
+          title="PDF viewer"
+        />
+        <div v-else class="state-overlay">
+          <div class="spinner"></div>
+          <span>Loading PDF…</span>
+        </div>
+        <div class="pdf-toolbar">
+          <p v-if="downloadError" class="download-error">{{ downloadError }}</p>
+          <button class="btn-ghost" :disabled="downloading" @click="downloadBook">
+            {{ downloading ? 'Downloading…' : 'Download PDF' }}
+          </button>
+        </div>
+      </div>
+
       <div v-else-if="book && book.file_type !== 'epub'" class="state-overlay">
         <div class="card fallback-card">
           <p>In-browser reading is only supported for EPUB files.</p>
@@ -224,12 +243,14 @@ let refreshBlocksFrame: number | null = null
 let autoAdvanceTimer: ReturnType<typeof setTimeout> | null = null
 let speechToken = 0
 let pendingAutoAdvance = false
+let autoAdvancePreviousCfi: string | null = null
 
 const contentCleanups = new Map<Document, () => void>()
 
 const loading = ref(true)
 const epubError = ref<string | null>(null)
 const downloadError = ref<string | null>(null)
+const pdfBlobUrl = ref<string | null>(null)
 const ttsError = ref<string | null>(null)
 const currentPercentage = ref(0)
 const currentCfi = ref<string | null>(null)
@@ -730,8 +751,9 @@ function refreshVisibleBlocks(): void {
 
   syncBlockMarkers()
 
-  if (pendingAutoAdvance) {
+  if (pendingAutoAdvance && currentCfi.value !== autoAdvancePreviousCfi) {
     pendingAutoAdvance = false
+    autoAdvancePreviousCfi = null
     void startTts()
   }
 }
@@ -801,6 +823,7 @@ function activeBlockIndex(): number {
 function internalStopTts(options: StopTtsOptions = {}): void {
   cancelSpeechOutput()
   pendingAutoAdvance = false
+  autoAdvancePreviousCfi = null
   ttsMode.value = 'idle'
   ttsUsingFallback.value = false
   currentSpokenBlockCfi.value = null
@@ -912,6 +935,7 @@ async function queueAutoAdvance(): Promise<void> {
   currentSpokenBlockCfi.value = null
   ttsUsingFallback.value = false
   pendingAutoAdvance = true
+  autoAdvancePreviousCfi = currentCfi.value
   syncBlockMarkers()
 
   const previousCfi = currentCfi.value
@@ -1049,6 +1073,17 @@ onMounted(async () => {
     return
   }
 
+  if (book.value?.file_type === 'pdf') {
+    loading.value = false
+    try {
+      const blob = await getContentBlob(id)
+      pdfBlobUrl.value = URL.createObjectURL(blob)
+    } catch {
+      // Non-fatal — the toolbar still shows a download button
+    }
+    return
+  }
+
   if (book.value?.file_type !== 'epub') {
     loading.value = false
     return
@@ -1096,6 +1131,11 @@ onUnmounted(() => {
   epubBook?.destroy()
   rendition = null
   epubBook = null
+
+  if (pdfBlobUrl.value) {
+    URL.revokeObjectURL(pdfBlobUrl.value)
+    pdfBlobUrl.value = null
+  }
 })
 </script>
 
@@ -1331,6 +1371,30 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+.pdf-viewer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pdf-iframe {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: none;
+}
+
+.pdf-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .reader-footer {

@@ -15,6 +15,7 @@ export interface Book {
   cover_path: string
   file_path: string
   file_type: 'epub' | 'pdf' | 'url'
+  file_size: number
   metadata: BookMetadata
   zealot_ticket_id?: string
   created_at: string
@@ -83,4 +84,29 @@ export interface BookListItem {
   list_id: string
   book_id: string
   added_at: string
+}
+
+export interface MetadataSource {
+  id: string
+  name: string
+  link: string
+}
+
+export interface MetadataResult {
+  title: string
+  authors: string[]
+  description?: string
+  cover_url?: string
+  publisher?: string
+  published_date?: string
+  isbn?: string
+  language?: string
+  tags?: string[]
+  source: MetadataSource
+  external_url?: string
+}
+
+export interface MetadataSearchResponse {
+  results: MetadataResult[]
+  errors: Array<{ provider: string; message: string }>
 }

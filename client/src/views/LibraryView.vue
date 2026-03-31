@@ -4,7 +4,7 @@
 
     <div class="layout">
       <!-- Sidebar -->
-      <aside class="sidebar">
+      <aside class="sidebar" :class="{ visible: showFilters }">
         <section class="sidebar-section">
           <h3 class="sidebar-heading">Authors</h3>
           <ul class="filter-list">
@@ -69,11 +69,13 @@
               <option value="title">Title</option>
               <option value="author">Author</option>
               <option value="rating">My rating</option>
+              <option value="file_size">File size</option>
             </select>
             <button class="sort-dir btn-ghost" @click="toggleSortDir" :title="sortOrderVal === 'asc' ? 'Ascending' : 'Descending'">
               {{ sortOrderVal === 'asc' ? '↑' : '↓' }}
             </button>
           </div>
+          <button class="btn-ghost filter-toggle" @click="showFilters = !showFilters">Filters</button>
           <button class="btn-primary" @click="openUploadModal">+ Add book</button>
         </div>
 
@@ -93,8 +95,11 @@
         </div>
 
         <div v-if="books.total > 0" class="pagination">
-          <span class="total">{{ books.total }} book{{ books.total !== 1 ? 's' : '' }}</span>
+          <span class="total">{{ books.books.length }} of {{ books.total }} book{{ books.total !== 1 ? 's' : '' }}</span>
         </div>
+
+        <div ref="sentinel" class="sentinel" aria-hidden="true" />
+        <div v-if="books.loadingMore" class="state-msg load-more-msg">Loading more…</div>
       </main>
     </div>
 
@@ -199,7 +204,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import NavBar from '@/components/NavBar.vue'
 import BookCard from '@/components/BookCard.vue'
@@ -213,12 +218,16 @@ const books = useBooksStore()
 const listsStore = useListsStore()
 const router = useRouter()
 
+const sentinel = ref<HTMLElement | null>(null)
+let observer: IntersectionObserver | null = null
+
 const search = ref('')
 const selectedAuthor = ref('')
 const selectedGenre = ref('')
-const sortByVal = ref<'created_at' | 'title' | 'author' | 'rating'>('created_at')
+const sortByVal = ref<'created_at' | 'title' | 'author' | 'rating' | 'file_size'>('created_at')
 const sortOrderVal = ref<'asc' | 'desc'>('desc')
 
+const showFilters = ref(false)
 const selectedBook = ref<Book | null>(null)
 const bookToEdit = ref<Book | null>(null)
 const showAddToList = ref(false)
@@ -259,6 +268,24 @@ onMounted(async () => {
     books.fetchGenres(),
     listsStore.fetchLists(),
   ])
+
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0].isIntersecting && books.hasMore && !books.loadingMore) {
+        books.loadMore()
+      }
+    },
+    { rootMargin: '200px' },
+  )
+  if (sentinel.value) observer.observe(sentinel.value)
+})
+
+onUnmounted(() => {
+  observer?.disconnect()
+})
+
+watch(sentinel, (el) => {
+  if (el && observer) observer.observe(el)
 })
 
 function currentFilter() {
@@ -574,10 +601,19 @@ async function uploadBooks() {
 }
 
 .pagination {
-  margin-top: 2rem;
+  margin-top: 1.5rem;
   text-align: center;
   color: var(--text-muted);
   font-size: 0.85rem;
+}
+
+.sentinel {
+  height: 1px;
+}
+
+.load-more-msg {
+  padding: 1.5rem 0;
+  font-size: 0.9rem;
 }
 
 /* Upload / add-to-list modal (shared styles) */
@@ -619,6 +655,8 @@ async function uploadBooks() {
   gap: 0.75rem;
   margin: 0;
   padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
 }
 .upload-queue-item {
   padding: 0.85rem 0.95rem;
@@ -683,6 +721,22 @@ async function uploadBooks() {
   justify-content: flex-end;
   gap: 0.75rem;
   margin-top: 0.75rem;
+}
+
+/* Mobile responsiveness */
+.filter-toggle { display: none; }
+
+@media (max-width: 768px) {
+  .layout { flex-direction: column; padding: 1rem; gap: 1rem; }
+  .sidebar { display: none; width: 100%; position: static; max-height: 300px; overflow-y: auto; }
+  .sidebar.visible { display: flex; }
+  .filter-toggle { display: inline-flex; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 1rem; }
+  .search-wrap { min-width: 0; max-width: none; }
+}
+
+@media (max-width: 400px) {
+  .grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* Add-to-list picker */

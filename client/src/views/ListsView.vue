@@ -319,6 +319,12 @@ function openReader(book: Book) {
 }
 .placeholder { padding: 6rem 0; }
 
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  .layout { flex-direction: column; padding: 1rem; gap: 1rem; }
+  .lists-panel { width: 100%; position: static; max-height: 180px; overflow-y: auto; }
+}
+
 /* Modal */
 .modal-overlay {
   position: fixed;

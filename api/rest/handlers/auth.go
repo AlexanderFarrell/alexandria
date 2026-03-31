@@ -114,8 +114,9 @@ func respondErr(c *fiber.Ctx, err error) error {
 	}
 	if status < fiber.StatusInternalServerError {
 		message = err.Error()
+		log.Printf("request error: %s %s -> %d: %v", c.Method(), c.OriginalURL(), status, err)
 	} else {
-		log.Printf("request error: %s %s: %v", c.Method(), c.OriginalURL(), err)
+		log.Printf("request error: %s %s -> %d: %v", c.Method(), c.OriginalURL(), status, err)
 	}
 	return c.Status(status).JSON(fiber.Map{"error": message})
 }

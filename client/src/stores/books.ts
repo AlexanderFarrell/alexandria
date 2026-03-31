@@ -3,34 +3,64 @@ import { ref } from 'vue'
 import * as booksApi from '@/api/books'
 import type { AuthorSummary, Book, GenreSummary, ReadingProgress } from '@/types'
 
+const PAGE_SIZE = 24
+
 export const useBooksStore = defineStore('books', () => {
   const books = ref<Book[]>([])
   const total = ref(0)
+  const page = ref(1)
+  const hasMore = ref(false)
   const currentBook = ref<Book | null>(null)
   const currentProgress = ref<ReadingProgress | null>(null)
   const loading = ref(false)
+  const loadingMore = ref(false)
 
   const authors = ref<AuthorSummary[]>([])
   const genres = ref<GenreSummary[]>([])
   const sortBy = ref<booksApi.ListParams['sort_by']>('created_at')
   const sortOrder = ref<booksApi.ListParams['sort_order']>('desc')
 
-  // Track last used filter params (author/genre/search) so setSort can re-fetch with them
+  // Track last used filter params (author/genre/search) so setSort/loadMore can re-use them
   const lastFilter = ref<booksApi.ListParams>({})
 
   async function fetchBooks(params: booksApi.ListParams = {}) {
     lastFilter.value = params
+    page.value = 1
     loading.value = true
     try {
       const res = await booksApi.listBooks({
         ...params,
         sort_by: sortBy.value,
         sort_order: sortOrder.value,
+        page: 1,
+        limit: PAGE_SIZE,
       })
       books.value = res.books ?? []
       total.value = res.total
+      hasMore.value = books.value.length < res.total
     } finally {
       loading.value = false
+    }
+  }
+
+  async function loadMore() {
+    if (loadingMore.value || !hasMore.value) return
+    loadingMore.value = true
+    const nextPage = page.value + 1
+    try {
+      const res = await booksApi.listBooks({
+        ...lastFilter.value,
+        sort_by: sortBy.value,
+        sort_order: sortOrder.value,
+        page: nextPage,
+        limit: PAGE_SIZE,
+      })
+      books.value = [...books.value, ...(res.books ?? [])]
+      total.value = res.total
+      page.value = nextPage
+      hasMore.value = books.value.length < res.total
+    } finally {
+      loadingMore.value = false
     }
   }
 
@@ -88,6 +118,14 @@ export const useBooksStore = defineStore('books', () => {
     return res.progress
   }
 
+  async function refreshBookMetadata(id: string): Promise<Book> {
+    const res = await booksApi.refreshMetadata(id)
+    const idx = books.value.findIndex((b) => b.id === id)
+    if (idx !== -1) books.value[idx] = res.book
+    if (currentBook.value?.id === id) currentBook.value = res.book
+    return res.book
+  }
+
   async function fetchAuthors() {
     const res = await booksApi.listAuthors()
     authors.value = res.authors ?? []
@@ -110,14 +148,18 @@ export const useBooksStore = defineStore('books', () => {
   return {
     books,
     total,
+    page,
+    hasMore,
     currentBook,
     currentProgress,
     loading,
+    loadingMore,
     authors,
     genres,
     sortBy,
     sortOrder,
     fetchBooks,
+    loadMore,
     fetchBook,
     uploadBook,
     updateBook,
@@ -125,6 +167,7 @@ export const useBooksStore = defineStore('books', () => {
     fetchProgress,
     saveProgress,
     rateBook,
+    refreshBookMetadata,
     fetchAuthors,
     fetchGenres,
     setSort,

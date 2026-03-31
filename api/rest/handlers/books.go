@@ -91,6 +91,7 @@ func (h *BookHandler) Upload(c *fiber.Ctx) error {
 	input := services.UploadInput{
 		Filename:    filepath.Base(file.Filename),
 		Content:     f,
+		FileSize:    file.Size,
 		Title:       c.FormValue("title"),
 		Author:      c.FormValue("author"),
 		Description: c.FormValue("description"),
@@ -113,12 +114,12 @@ func (h *BookHandler) GetByID(c *fiber.Ctx) error {
 }
 
 type updateBookMetadataRequest struct {
-	ISBN        *string    `json:"isbn"`
-	Publisher   *string    `json:"publisher"`
-	PublishedAt *time.Time `json:"published_at"`
-	Language    *string    `json:"language"`
-	Genres      *[]string  `json:"genres"`
-	Tags        *[]string  `json:"tags"`
+	ISBN        *string   `json:"isbn"`
+	Publisher   *string   `json:"publisher"`
+	PublishedAt *string   `json:"published_at"` // YYYY-MM-DD from <input type="date">
+	Language    *string   `json:"language"`
+	Genres      *[]string `json:"genres"`
+	Tags        *[]string `json:"tags"`
 }
 
 type updateBookRequest struct {
@@ -127,6 +128,7 @@ type updateBookRequest struct {
 	Description    *string                    `json:"description"`
 	ZealotTicketID *string                    `json:"zealot_ticket_id"`
 	Metadata       *updateBookMetadataRequest `json:"metadata"`
+	CoverURL       *string                    `json:"cover_url"`
 }
 
 // Update handles PUT /api/v1/books/:id
@@ -141,11 +143,18 @@ func (h *BookHandler) Update(c *fiber.Ctx) error {
 		Author:         req.Author,
 		Description:    req.Description,
 		ZealotTicketID: req.ZealotTicketID,
+		CoverURL:       req.CoverURL,
 	}
 	if req.Metadata != nil {
 		u.ISBN = req.Metadata.ISBN
 		u.Publisher = req.Metadata.Publisher
-		u.PublishedAt = req.Metadata.PublishedAt
+		if req.Metadata.PublishedAt != nil && *req.Metadata.PublishedAt != "" {
+			t, err := parseDateInput(*req.Metadata.PublishedAt)
+			if err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "published_at must be YYYY-MM-DD"})
+			}
+			u.PublishedAt = &t
+		}
 		u.Language = req.Metadata.Language
 		u.Genres = req.Metadata.Genres
 		u.Tags = req.Metadata.Tags
@@ -166,11 +175,38 @@ func (h *BookHandler) Delete(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"message": "deleted"})
 }
 
-// ServeContent handles GET /api/v1/books/:id/content.
-func (h *BookHandler) ServeContent(c *fiber.Ctx) error {
-	rc, book, err := h.books.OpenFile(c.Context(), c.Params("id"))
+// RefreshMetadata handles POST /api/v1/books/:id/refresh
+func (h *BookHandler) RefreshMetadata(c *fiber.Ctx) error {
+	book, err := h.books.RefreshMetadata(c.Context(), c.Params("id"))
 	if err != nil {
 		return respondErr(c, err)
+	}
+	return c.JSON(fiber.Map{"book": book})
+}
+
+// ServeContent handles GET /api/v1/books/:id/content.
+// Pass ?inline=true to serve with Content-Disposition: inline (for in-browser viewing).
+func (h *BookHandler) ServeContent(c *fiber.Ctx) error {
+	rc, book, mtime, err := h.books.OpenFile(c.Context(), c.Params("id"))
+	if err != nil {
+		return respondErr(c, err)
+	}
+
+	if !mtime.IsZero() {
+		etag := fmt.Sprintf(`"%x"`, mtime.UnixNano())
+		c.Set("ETag", etag)
+		c.Set("Last-Modified", mtime.UTC().Format(http.TimeFormat))
+		c.Set("Cache-Control", "private, max-age=604800")
+		if c.Get("If-None-Match") == etag {
+			rc.Close()
+			return c.SendStatus(fiber.StatusNotModified)
+		}
+		if ims := c.Get("If-Modified-Since"); ims != "" {
+			if t, err := http.ParseTime(ims); err == nil && !mtime.After(t) {
+				rc.Close()
+				return c.SendStatus(fiber.StatusNotModified)
+			}
+		}
 	}
 
 	contentType := "application/octet-stream"
@@ -181,16 +217,38 @@ func (h *BookHandler) ServeContent(c *fiber.Ctx) error {
 		contentType = "application/pdf"
 	}
 
+	disposition := "attachment"
+	if c.QueryBool("inline") {
+		disposition = "inline"
+	}
+
 	c.Set("Content-Type", contentType)
-	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(book.FilePath)))
+	c.Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, disposition, filepath.Base(book.FilePath)))
 	return c.SendStream(rc)
 }
 
 // ServeCover handles GET /api/v1/books/:id/cover
 func (h *BookHandler) ServeCover(c *fiber.Ctx) error {
-	rc, err := h.books.OpenCover(c.Context(), c.Params("id"))
+	rc, mtime, err := h.books.OpenCover(c.Context(), c.Params("id"))
 	if err != nil {
 		return respondErr(c, err)
+	}
+
+	if !mtime.IsZero() {
+		etag := fmt.Sprintf(`"%x"`, mtime.UnixNano())
+		c.Set("ETag", etag)
+		c.Set("Last-Modified", mtime.UTC().Format(http.TimeFormat))
+		c.Set("Cache-Control", "private, max-age=86400")
+		if c.Get("If-None-Match") == etag {
+			rc.Close()
+			return c.SendStatus(fiber.StatusNotModified)
+		}
+		if ims := c.Get("If-Modified-Since"); ims != "" {
+			if t, err := http.ParseTime(ims); err == nil && !mtime.After(t) {
+				rc.Close()
+				return c.SendStatus(fiber.StatusNotModified)
+			}
+		}
 	}
 
 	buffered := bufio.NewReader(rc)
@@ -201,6 +259,16 @@ func (h *BookHandler) ServeCover(c *fiber.Ctx) error {
 	}
 	c.Set("Content-Type", http.DetectContentType(header))
 	return c.SendStream(readCloserStream{Reader: buffered, Closer: rc})
+}
+
+// parseDateInput accepts YYYY-MM-DD (from HTML date inputs) or RFC3339.
+func parseDateInput(s string) (time.Time, error) {
+	for _, layout := range []string{"2006-01-02", time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("cannot parse date %q", s)
 }
 
 func queryInt(c *fiber.Ctx, key string, def int) int {

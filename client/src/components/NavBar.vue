@@ -59,4 +59,8 @@ function logout() {
 }
 .nav-link:hover { color: var(--text); text-decoration: none; }
 .nav-link.router-link-active { color: var(--accent); background: var(--surface-hover); }
+
+@media (max-width: 480px) {
+  .navbar { padding: 0 1rem; }
+}
 </style>

@@ -61,7 +61,7 @@ button {
 
 .btn-ghost {
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text);
   border: 1px solid var(--border);
 }
 .btn-ghost:hover { background: var(--surface-hover); color: var(--text); }

@@ -5,7 +5,7 @@ export interface ListParams {
   search?: string
   author?: string
   genre?: string
-  sort_by?: 'title' | 'author' | 'created_at' | 'rating'
+  sort_by?: 'title' | 'author' | 'created_at' | 'rating' | 'file_size'
   sort_order?: 'asc' | 'desc'
   page?: number
   limit?: number
@@ -34,6 +34,7 @@ export interface BookUpdatePayload {
   description?: string
   zealot_ticket_id?: string
   metadata?: Partial<BookMetadata>
+  cover_url?: string
 }
 
 export async function updateBook(id: string, updates: BookUpdatePayload): Promise<{ book: Book }> {
@@ -64,6 +65,11 @@ export async function getContentBlob(id: string): Promise<Blob> {
   const { data } = await client.get(`/books/${id}/content`, {
     responseType: 'blob',
   })
+  return data
+}
+
+export async function refreshMetadata(id: string): Promise<{ book: Book }> {
+  const { data } = await client.post(`/books/${id}/refresh`)
   return data
 }
 

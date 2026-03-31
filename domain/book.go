@@ -30,6 +30,7 @@ type Book struct {
 	CoverPath      string       `json:"cover_path"`
 	FilePath       string       `json:"file_path"`
 	FileType       FileType     `json:"file_type"`
+	FileSize       int64        `json:"file_size"`
 	Metadata       BookMetadata `json:"metadata"`
 	ZealotTicketID *string      `json:"zealot_ticket_id,omitempty"`
 	CreatedAt      time.Time    `json:"created_at"`

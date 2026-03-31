@@ -12,6 +12,7 @@ func (s *FiberServer) registerRoutes(
 	bookH *handlers.BookHandler,
 	readerH *handlers.ReaderHandler,
 	listH *handlers.ListHandler,
+	metadataH *handlers.MetadataHandler,
 ) {
 	s.app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
@@ -51,6 +52,7 @@ func (s *FiberServer) registerRoutes(
 	books.Delete("/:id", bookH.Delete)
 	books.Get("/:id/content", bookH.ServeContent)
 	books.Get("/:id/cover", bookH.ServeCover)
+	books.Post("/:id/refresh", bookH.RefreshMetadata)
 	books.Get("/:id/progress", readerH.GetProgress)
 	books.Put("/:id/progress", readerH.SaveProgress)
 
@@ -63,4 +65,7 @@ func (s *FiberServer) registerRoutes(
 	lists.Get("/:id/books", listH.ListItems)
 	lists.Post("/:id/books", listH.AddBook)
 	lists.Delete("/:id/books/:bookId", listH.RemoveBook)
+
+	metadataG := protected.Group("/metadata")
+	metadataG.Get("/search", metadataH.Search)
 }

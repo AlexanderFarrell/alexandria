@@ -1,7 +1,12 @@
 <template>
   <div class="modal-overlay" @click.self="$emit('close')">
     <div class="modal card">
-      <h2>Edit book</h2>
+      <div class="modal-title-row">
+        <h2>Edit book</h2>
+        <button type="button" class="btn-ghost btn-sm" @click="showMetadataSearch = true">
+          Search Online
+        </button>
+      </div>
       <form @submit.prevent="onSubmit">
         <div class="fields">
           <div class="field">
@@ -55,12 +60,21 @@
       </form>
     </div>
   </div>
+
+  <MetadataSearchModal
+    v-if="showMetadataSearch"
+    :initial-title="form.title"
+    :initial-author="form.author"
+    @close="showMetadataSearch = false"
+    @apply="onApplyMetadata"
+  />
 </template>
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useBooksStore } from '@/stores/books'
-import type { Book } from '@/types'
+import type { Book, MetadataResult } from '@/types'
+import MetadataSearchModal from './MetadataSearchModal.vue'
 
 const props = defineProps<{ book: Book }>()
 const emit = defineEmits<{
@@ -71,6 +85,8 @@ const emit = defineEmits<{
 const booksStore = useBooksStore()
 const saving = ref(false)
 const error = ref('')
+const showMetadataSearch = ref(false)
+const pendingCoverURL = ref<string | null>(null)
 
 const meta = props.book.metadata
 
@@ -95,6 +111,22 @@ function splitComma(raw: string): string[] {
   return raw.split(',').map((s) => s.trim()).filter(Boolean)
 }
 
+function onApplyMetadata(result: MetadataResult, replaceCover: boolean) {
+  if (result.title) form.title = result.title
+  if (result.authors.length) form.author = result.authors.join(', ')
+  if (result.description) form.description = result.description
+  if (result.publisher) form.publisher = result.publisher
+  if (result.language) form.language = result.language
+  if (result.isbn) form.isbn = result.isbn
+  if (result.published_date) {
+    const d = result.published_date
+    form.publishedAt = d.length === 4 ? d + '-01-01' : d.slice(0, 10)
+  }
+  if (result.tags?.length) form.genresRaw = result.tags.join(', ')
+  pendingCoverURL.value = replaceCover && result.cover_url ? result.cover_url : null
+  showMetadataSearch.value = false
+}
+
 async function onSubmit() {
   saving.value = true
   error.value = ''
@@ -111,6 +143,7 @@ async function onSubmit() {
         genres: splitComma(form.genresRaw),
         tags: splitComma(form.tagsRaw),
       },
+      ...(pendingCoverURL.value ? { cover_url: pendingCoverURL.value } : {}),
     })
     emit('saved', updatedBook)
   } catch (e: unknown) {
@@ -140,9 +173,19 @@ async function onSubmit() {
   overflow-y: auto;
   padding: 1.5rem;
 }
-.modal h2 {
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 1.25rem;
+}
+.modal-title-row h2 {
   font-size: 1.1rem;
+  margin: 0;
+}
+.btn-sm {
+  font-size: 0.8rem;
+  padding: 0.3rem 0.7rem;
 }
 .fields {
   display: flex;

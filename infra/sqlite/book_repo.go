@@ -75,10 +75,11 @@ func (r *bookRepo) List(ctx context.Context, filter repos.BookFilter) ([]*domain
 
 	// Build sort clause from allowlist to prevent injection
 	validSortCols := map[string]string{
-		"title":      "books.title",
-		"author":     "books.author",
+		"title":      "LOWER(books.title)",
+		"author":     "LOWER(books.author)",
 		"created_at": "books.created_at",
 		"rating":     "rp.rating",
+		"file_size":  "books.file_size",
 	}
 	col, ok := validSortCols[filter.SortBy]
 	if !ok {
@@ -161,6 +162,7 @@ func toBookModel(b *domain.Book) BookModel {
 		CoverPath:       b.CoverPath,
 		FilePath:        b.FilePath,
 		FileType:        string(b.FileType),
+		FileSize:        b.FileSize,
 		MetaISBN:        b.Metadata.ISBN,
 		MetaPublisher:   b.Metadata.Publisher,
 		MetaPublishedAt: b.Metadata.PublishedAt,
@@ -182,6 +184,7 @@ func fromBookModel(m *BookModel) *domain.Book {
 		CoverPath:   m.CoverPath,
 		FilePath:    m.FilePath,
 		FileType:    domain.FileType(m.FileType),
+		FileSize:    m.FileSize,
 		Metadata: domain.BookMetadata{
 			ISBN:        m.MetaISBN,
 			Publisher:   m.MetaPublisher,

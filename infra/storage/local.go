@@ -67,3 +67,15 @@ func (s *localFileStore) Exists(_ context.Context, path string) (bool, error) {
 	}
 	return true, nil
 }
+
+func (s *localFileStore) Stat(_ context.Context, path string) (ports.FileInfo, error) {
+	full := filepath.Join(s.baseDir, path)
+	fi, err := os.Stat(full)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ports.FileInfo{}, domain.ErrNotFound
+		}
+		return ports.FileInfo{}, fmt.Errorf("stat: %w", err)
+	}
+	return ports.FileInfo{ModTime: fi.ModTime()}, nil
+}

@@ -12,8 +12,13 @@ import (
 
 	"alexandria/api/rest"
 	"alexandria/app"
+	"alexandria/app/ports"
 	"alexandria/config"
+	"alexandria/domain"
 	"alexandria/infra/epub"
+	"alexandria/infra/metadata"
+	"alexandria/infra/parser"
+	"alexandria/infra/pdf"
 	"alexandria/infra/sqlite"
 	"alexandria/infra/storage"
 )
@@ -42,10 +47,19 @@ func main() {
 	listRepo := sqlite.NewListRepo(db)
 
 	fileStore := storage.NewLocalFileStore(cfg.DataDir)
-	epubParser := epub.New()
+	bookParser := parser.New(map[domain.FileType]ports.BookParser{
+		domain.FileTypeEPUB: epub.New(),
+		domain.FileTypePDF:  pdf.New(),
+	})
+
+	// Metadata providers (no API keys required — public endpoints)
+	metadataProviders := []ports.MetadataProvider{
+		metadata.NewGoogleBooks(),
+		metadata.NewOpenLibrary(),
+	}
 
 	// Application core
-	application := app.New(userRepo, bookRepo, progressRepo, listRepo, fileStore, epubParser, cfg)
+	application := app.New(userRepo, bookRepo, progressRepo, listRepo, fileStore, bookParser, metadataProviders, cfg)
 	if err := application.Auth.ValidateStartup(context.Background()); err != nil {
 		log.Fatalf("invalid startup state: %v", err)
 	}

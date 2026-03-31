@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -23,6 +26,7 @@ import (
 type UploadInput struct {
 	Filename    string
 	Content     io.Reader
+	FileSize    int64  // byte size of the uploaded file
 	Title       string // optional; overrides extracted metadata
 	Author      string // optional
 	Description string // optional
@@ -41,6 +45,8 @@ type BookUpdate struct {
 	Language    *string
 	Genres      *[]string
 	Tags        *[]string
+	// CoverURL: if set, download this URL and store it as the book's cover image.
+	CoverURL *string
 }
 
 // BookService handles book library operations.
@@ -85,19 +91,13 @@ func (s *BookService) Upload(ctx context.Context, input UploadInput) (*domain.Bo
 		return nil, fmt.Errorf("save file: %w", err)
 	}
 
-	// Parse metadata (EPUB only for now; PDF gets minimal metadata)
+	// Parse metadata from the stored file (dispatcher routes by extension)
 	absFilePath := filepath.Join(s.dataDir, filePath)
-	var book *domain.Book
-	if fileType == domain.FileTypeEPUB {
-		parsed, err := s.parser.ParseMetadata(ctx, absFilePath)
-		if err != nil {
-			// Non-fatal: log and continue with empty metadata
-			parsed = &domain.Book{FileType: domain.FileTypeEPUB}
-		}
-		book = parsed
-	} else {
-		book = &domain.Book{FileType: fileType}
+	book, err := s.parser.ParseMetadata(ctx, absFilePath)
+	if err != nil || book == nil {
+		book = &domain.Book{}
 	}
+	book.FileType = fileType
 
 	// Apply manual overrides
 	if input.Title != "" {
@@ -114,11 +114,11 @@ func (s *BookService) Upload(ctx context.Context, input UploadInput) (*domain.Bo
 		book.Title = strings.TrimSuffix(input.Filename, ext)
 	}
 
-	// Extract cover image
+	// Extract cover image (dispatcher handles per-format logic)
 	coverPath := filepath.Join("books", id, "cover.jpg")
 	absCovers := filepath.Join(s.dataDir, coverPath)
-	if fileType == domain.FileTypeEPUB {
-		if err := s.parser.ExtractCover(ctx, absFilePath, absCovers); err == nil {
+	if err := s.parser.ExtractCover(ctx, absFilePath, absCovers); err == nil {
+		if exists, _ := s.store.Exists(ctx, coverPath); exists {
 			book.CoverPath = coverPath
 		}
 	}
@@ -126,6 +126,7 @@ func (s *BookService) Upload(ctx context.Context, input UploadInput) (*domain.Bo
 	now := time.Now()
 	book.ID = id
 	book.FilePath = filePath
+	book.FileSize = input.FileSize
 	book.CreatedAt = now
 	book.UpdatedAt = now
 
@@ -183,12 +184,61 @@ func (s *BookService) Update(ctx context.Context, id string, u BookUpdate) (*dom
 	if u.Tags != nil {
 		book.Metadata.Tags = *u.Tags
 	}
+	if u.CoverURL != nil {
+		if err := s.applyCoverFromURL(ctx, book, *u.CoverURL); err != nil {
+			log.Printf("apply cover from URL for book %s: %v", book.ID, err)
+			// non-fatal — continue with the rest of the update
+		}
+	}
+
 	book.UpdatedAt = time.Now()
 
 	if err := s.books.Update(ctx, book); err != nil {
 		return nil, err
 	}
 	return book, nil
+}
+
+// applyCoverFromURL downloads an image from rawURL and stores it as the book's cover.
+func (s *BookService) applyCoverFromURL(ctx context.Context, book *domain.Book, rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("parse cover URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("cover URL scheme must be http or https, got %q", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" || host == "::1" {
+		return fmt.Errorf("cover URL host %q is not allowed", host)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return fmt.Errorf("build cover request: %w", err)
+	}
+	hc := &http.Client{Timeout: 15 * time.Second}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("fetch cover: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("fetch cover: HTTP %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "image/") {
+		return fmt.Errorf("cover URL returned non-image content-type %q", ct)
+	}
+
+	coverPath := filepath.Join("books", book.ID, "cover.jpg")
+	limited := io.LimitReader(resp.Body, 10<<20) // 10 MB cap
+	if err := s.store.Save(ctx, coverPath, limited); err != nil {
+		return fmt.Errorf("save cover: %w", err)
+	}
+	book.CoverPath = coverPath
+	return nil
 }
 
 // Delete removes a book record and its associated files.
@@ -201,20 +251,24 @@ func (s *BookService) Delete(ctx context.Context, id string) error {
 	return s.books.Delete(ctx, id)
 }
 
-// OpenFile returns a reader for the book's raw file (epub/pdf).
-func (s *BookService) OpenFile(ctx context.Context, id string) (io.ReadCloser, *domain.Book, error) {
+// OpenFile returns a reader for the book's raw file (epub/pdf) along with the file's modification time.
+func (s *BookService) OpenFile(ctx context.Context, id string) (io.ReadCloser, *domain.Book, time.Time, error) {
 	book, err := s.books.GetByID(ctx, id)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, time.Time{}, err
 	}
 	rc, err := s.store.Open(ctx, book.FilePath)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return nil, nil, domain.ErrNotFound
+			return nil, nil, time.Time{}, domain.ErrNotFound
 		}
-		return nil, nil, fmt.Errorf("open book file: %w", err)
+		return nil, nil, time.Time{}, fmt.Errorf("open book file: %w", err)
 	}
-	return rc, book, nil
+	fi, err := s.store.Stat(ctx, book.FilePath)
+	if err != nil {
+		return rc, book, time.Time{}, nil
+	}
+	return rc, book, fi.ModTime, nil
 }
 
 // ListAuthors returns all distinct authors with their book counts.
@@ -227,23 +281,84 @@ func (s *BookService) ListGenres(ctx context.Context) ([]repos.GenreSummary, err
 	return s.books.ListGenres(ctx)
 }
 
-// OpenCover returns a reader for the book's cover image.
-func (s *BookService) OpenCover(ctx context.Context, id string) (io.ReadCloser, error) {
+// OpenCover returns a reader for the book's cover image along with the file's modification time.
+func (s *BookService) OpenCover(ctx context.Context, id string) (io.ReadCloser, time.Time, error) {
 	book, err := s.books.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	if book.CoverPath == "" {
-		return nil, domain.ErrNotFound
+		return nil, time.Time{}, domain.ErrNotFound
 	}
 	rc, err := s.store.Open(ctx, book.CoverPath)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return nil, domain.ErrNotFound
+			return nil, time.Time{}, domain.ErrNotFound
 		}
-		return nil, fmt.Errorf("open cover: %w", err)
+		return nil, time.Time{}, fmt.Errorf("open cover: %w", err)
 	}
-	return rc, nil
+	fi, err := s.store.Stat(ctx, book.CoverPath)
+	if err != nil {
+		return rc, time.Time{}, nil
+	}
+	return rc, fi.ModTime, nil
+}
+
+// RefreshMetadata re-extracts metadata and cover from the stored file,
+// overwriting auto-extractable fields while preserving user-set tags.
+func (s *BookService) RefreshMetadata(ctx context.Context, id string) (*domain.Book, error) {
+	book, err := s.books.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	absFilePath := filepath.Join(s.dataDir, book.FilePath)
+	parsed, err := s.parser.ParseMetadata(ctx, absFilePath)
+	if err == nil && parsed != nil {
+		if parsed.Title != "" {
+			book.Title = parsed.Title
+		}
+		if parsed.Author != "" {
+			book.Author = parsed.Author
+		}
+		if parsed.Description != "" {
+			book.Description = parsed.Description
+		}
+		if parsed.Metadata.Publisher != "" {
+			book.Metadata.Publisher = parsed.Metadata.Publisher
+		}
+		if parsed.Metadata.Language != "" {
+			book.Metadata.Language = parsed.Metadata.Language
+		}
+		if parsed.Metadata.ISBN != "" {
+			book.Metadata.ISBN = parsed.Metadata.ISBN
+		}
+		if parsed.Metadata.PublishedAt != nil {
+			book.Metadata.PublishedAt = parsed.Metadata.PublishedAt
+		}
+		if len(parsed.Metadata.Genres) > 0 {
+			book.Metadata.Genres = parsed.Metadata.Genres
+		}
+		// Preserve existing user-set tags; only apply parsed tags if none exist yet
+		if len(book.Metadata.Tags) == 0 && len(parsed.Metadata.Tags) > 0 {
+			book.Metadata.Tags = parsed.Metadata.Tags
+		}
+	}
+
+	// Re-extract cover (overwrite existing)
+	coverPath := filepath.Join("books", id, "cover.jpg")
+	absCovers := filepath.Join(s.dataDir, coverPath)
+	if err := s.parser.ExtractCover(ctx, absFilePath, absCovers); err == nil {
+		if exists, _ := s.store.Exists(ctx, coverPath); exists {
+			book.CoverPath = coverPath
+		}
+	}
+
+	book.UpdatedAt = time.Now()
+	if err := s.books.Update(ctx, book); err != nil {
+		return nil, err
+	}
+	return book, nil
 }
 
 func extToFileType(ext string) (domain.FileType, error) {

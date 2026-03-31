@@ -1,6 +1,17 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { getCoverBlob } from '@/api/books'
 
+// Module-level cache: blobs survive component unmount/remount during scrolling.
+const blobCache = new Map<string, Blob>()
+
+async function fetchCover(id: string): Promise<Blob> {
+  const cached = blobCache.get(id)
+  if (cached) return cached
+  const blob = await getCoverBlob(id)
+  blobCache.set(id, blob)
+  return blob
+}
+
 export function useBookCover(
   bookId: () => string | undefined,
   hasCover: () => boolean,
@@ -31,7 +42,7 @@ export function useBookCover(
     if (!id || !canLoad) return
 
     try {
-      const blob = await getCoverBlob(id)
+      const blob = await fetchCover(id)
       if (cancelled || activeRequestId !== requestId) return
 
       objectUrl = URL.createObjectURL(blob)

@@ -12,6 +12,7 @@ type BookModel struct {
 	CoverPath       string
 	FilePath        string  `gorm:"not null"`
 	FileType        string  `gorm:"not null"`
+	FileSize        int64
 	MetaISBN        string
 	MetaPublisher   string
 	MetaPublishedAt *time.Time
