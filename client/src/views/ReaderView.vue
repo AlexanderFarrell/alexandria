@@ -95,7 +95,12 @@
 
         <label class="tts-checkbox">
           <input v-model="ttsPrefs.autoAdvance" type="checkbox" @change="onAutoAdvanceChange" />
-          <span>Auto-advance to the next page</span>
+          <span>Auto-scroll while reading</span>
+        </label>
+
+        <label class="tts-checkbox">
+          <input v-model="readerPrefs.darkMode" type="checkbox" @change="onReaderThemeChange" />
+          <span>Dark reader mode</span>
         </label>
       </div>
 
@@ -148,18 +153,21 @@
       <div
         ref="epubContainer"
         class="epub-container"
-        :style="{ visibility: (loading || epubError || (book && book.file_type !== 'epub')) ? 'hidden' : 'visible' }"
+        :style="{
+          visibility: (loading || epubError || (book && book.file_type !== 'epub')) ? 'hidden' : 'visible',
+          background: readerPrefs.darkMode ? '#111318' : '#ffffff',
+        }"
       ></div>
 
       <div class="reader-footer" v-show="!loading && !epubError && book?.file_type === 'epub'">
-        <button class="btn-ghost nav-btn" @click="prevPage">← Prev</button>
+        <button class="btn-ghost nav-btn" @click="prevPage">↑ Up</button>
         <div class="progress-wrap">
           <div class="progress-track">
             <div class="progress-fill" :style="{ width: currentPercentage + '%' }"></div>
           </div>
           <span class="progress-label">{{ currentPercentage }}%</span>
         </div>
-        <button class="btn-ghost nav-btn" @click="nextPage">Next →</button>
+        <button class="btn-ghost nav-btn" @click="nextPage">↓ Down</button>
       </div>
     </div>
   </div>
@@ -177,11 +185,14 @@ import { getContentBlob } from '@/api/books'
 
 const READABLE_BLOCK_SELECTOR = 'p, li, blockquote, dd, dt, figcaption, h1, h2, h3, h4, h5, h6'
 const TTS_PREFS_KEY = 'alexandria.reader.tts'
+const READER_PREFS_KEY = 'alexandria.reader.display'
 const TTS_STYLE_KEY = 'alexandria-reader-tts'
 const TTS_BLOCK_ATTR = 'data-tts-block-id'
 const TTS_SELECTED_ATTR = 'data-tts-selected'
 const TTS_ACTIVE_ATTR = 'data-tts-active'
 const TTS_SELECTING_CLASS = 'alexandria-tts-selecting'
+const READER_THEME_LIGHT = 'alexandria-reader-light'
+const READER_THEME_DARK = 'alexandria-reader-dark'
 const TTS_IFRAME_STYLES = `
   [${TTS_BLOCK_ATTR}] {
     transition: background-color 0.16s ease, box-shadow 0.16s ease, outline-color 0.16s ease;
@@ -226,8 +237,16 @@ interface ReadableBlock {
   contents: Contents
 }
 
+interface ReaderPreferences {
+  darkMode: boolean
+}
+
 interface StopTtsOptions {
   preserveSelected?: boolean
+}
+
+type ReaderRenditionOptions = NonNullable<Parameters<EpubBook['renderTo']>[1]> & {
+  method: 'blobUrl'
 }
 
 const route = useRoute()
@@ -242,8 +261,8 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null
 let refreshBlocksFrame: number | null = null
 let autoAdvanceTimer: ReturnType<typeof setTimeout> | null = null
 let speechToken = 0
-let pendingAutoAdvance = false
-let autoAdvancePreviousCfi: string | null = null
+let pendingPageTurnResume = false
+let pageTurnPreviousLocation: string | null = null
 
 const contentCleanups = new Map<Document, () => void>()
 
@@ -266,6 +285,7 @@ const selectedStartBlockCfi = ref<string | null>(null)
 const currentSpokenBlockCfi = ref<string | null>(null)
 const ttsUsingFallback = ref(false)
 const ttsPrefs = reactive<TtsPreferences>(loadTtsPreferences())
+const readerPrefs = reactive<ReaderPreferences>(loadReaderPreferences())
 
 const book = computed(() => books.currentBook)
 const progress = computed(() => books.currentProgress)
@@ -299,6 +319,7 @@ const hasVisibleBlocks = computed(() => visibleBlocks.value.length > 0)
 const hasReadableText = computed(() => hasVisibleBlocks.value || fallbackPageText.value.length > 0)
 const canStartTts = computed(() => ttsMode.value !== 'selecting' && hasReadableText.value)
 const canChooseParagraph = computed(() => hasVisibleBlocks.value)
+const TTS_DEBUG = false
 
 const ttsBtnLabel = computed(() => {
   if (ttsMode.value === 'speaking') return 'Pause'
@@ -330,6 +351,30 @@ const ttsStatusClass = computed(() => {
   if (!hasReadableText.value) return 'is-disabled'
   return `is-${ttsMode.value}`
 })
+
+function ttsDebugState(): Record<string, unknown> {
+  return {
+    mode: ttsMode.value,
+    currentCfi: currentCfi.value,
+    currentLocation: currentLocationSignature(),
+    pendingPageTurnResume,
+    pageTurnPreviousLocation,
+    visibleBlockCount: visibleBlocks.value.length,
+    fallbackTextLength: fallbackPageText.value.length,
+    currentSpokenBlockCfi: currentSpokenBlockCfi.value,
+    selectedStartBlockCfi: selectedStartBlockCfi.value,
+    usingFallback: ttsUsingFallback.value,
+    autoAdvance: ttsPrefs.autoAdvance,
+  }
+}
+
+function logTtsDebug(event: string, details: Record<string, unknown> = {}): void {
+  if (!TTS_DEBUG) return
+  console.debug(`[ReaderView TTS] ${event}`, {
+    ...details,
+    state: ttsDebugState(),
+  })
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -382,6 +427,81 @@ function persistTtsPreferences(): void {
   } catch {
     // Ignore localStorage failures and keep the in-memory settings.
   }
+}
+
+function loadReaderPreferences(): ReaderPreferences {
+  const defaults: ReaderPreferences = {
+    darkMode: false,
+  }
+
+  if (typeof window === 'undefined') return defaults
+
+  try {
+    const raw = window.localStorage.getItem(READER_PREFS_KEY)
+    if (!raw) return defaults
+
+    const parsed = JSON.parse(raw) as Partial<ReaderPreferences>
+    return {
+      darkMode: Boolean(parsed.darkMode),
+    }
+  } catch {
+    return defaults
+  }
+}
+
+function persistReaderPreferences(): void {
+  try {
+    window.localStorage.setItem(READER_PREFS_KEY, JSON.stringify(readerPrefs))
+  } catch {
+    // Ignore localStorage failures and keep the in-memory settings.
+  }
+}
+
+function readerThemeRules(darkMode: boolean): Record<string, Record<string, string>> {
+  if (darkMode) {
+    return {
+      body: {
+        background: '#111318',
+        color: '#ece4d9',
+        'font-family': 'Georgia, serif',
+        'line-height': '1.7',
+        padding: '0 2rem',
+      },
+      a: {
+        color: '#d7b777',
+      },
+      'h1, h2, h3, h4, h5, h6, strong, b': {
+        color: '#f6efe5',
+      },
+    }
+  }
+
+  return {
+    body: {
+      background: '#ffffff',
+      color: '#1a1a1a',
+      'font-family': 'Georgia, serif',
+      'line-height': '1.7',
+      padding: '0 2rem',
+    },
+    a: {
+      color: '#8b6a2f',
+    },
+    'h1, h2, h3, h4, h5, h6, strong, b': {
+      color: '#1a1a1a',
+    },
+  }
+}
+
+function registerReaderThemes(): void {
+  if (!rendition) return
+  rendition.themes.register(READER_THEME_LIGHT, readerThemeRules(false))
+  rendition.themes.register(READER_THEME_DARK, readerThemeRules(true))
+}
+
+function applyReaderTheme(): void {
+  if (!rendition) return
+  rendition.themes.select(readerPrefs.darkMode ? READER_THEME_DARK : READER_THEME_LIGHT)
 }
 
 function normalizeLanguageTag(value: string | undefined): string {
@@ -460,23 +580,19 @@ async function initEpub(arrayBuffer: ArrayBuffer): Promise<void> {
   if (!epubContainer.value) throw new Error('epub container not mounted')
 
   epubBook = Epub(arrayBuffer as unknown as string)
-  rendition = epubBook.renderTo(epubContainer.value, {
-    flow: 'paginated',
+  const renditionOptions: ReaderRenditionOptions = {
+    manager: 'continuous',
+    flow: 'scrolled-continuous',
     spread: 'none',
     width: '100%',
     height: '100%',
     allowScriptedContent: false,
-  })
+    method: 'blobUrl',
+  }
+  rendition = epubBook.renderTo(epubContainer.value, renditionOptions)
 
-  rendition.themes.default({
-    body: {
-      background: '#ffffff',
-      color: '#1a1a1a',
-      'font-family': 'Georgia, serif',
-      'line-height': '1.7',
-      padding: '0 2rem',
-    },
-  })
+  registerReaderThemes()
+  applyReaderTheme()
 
   rendition.hooks.content.register((contents: Contents) => {
     setupTtsContents(contents)
@@ -491,6 +607,14 @@ async function initEpub(arrayBuffer: ArrayBuffer): Promise<void> {
     currentLocationState = location
     currentCfi.value = location?.start?.cfi ?? null
     currentPercentage.value = Math.round((location?.start?.percentage ?? 0) * 100)
+    logTtsDebug('relocated', {
+      startCfi: location?.start?.cfi ?? null,
+      endCfi: location?.end?.cfi ?? null,
+      startPage: location?.start?.displayed?.page ?? null,
+      endPage: location?.end?.displayed?.page ?? null,
+      atStart: location?.atStart ?? false,
+      atEnd: location?.atEnd ?? false,
+    })
     scheduleSaveProgress()
     scheduleVisibleBlocksRefresh()
   })
@@ -521,13 +645,66 @@ function flushProgress(): void {
 }
 
 async function prevPage(): Promise<void> {
-  internalStopTts({ preserveSelected: false })
-  await rendition?.prev()
+  await turnPage('prev')
 }
 
 async function nextPage(): Promise<void> {
-  internalStopTts({ preserveSelected: false })
-  await rendition?.next()
+  await turnPage('next')
+}
+
+function clearPendingPageTurnResume(): void {
+  logTtsDebug('clear-pending-page-turn-resume')
+  pendingPageTurnResume = false
+  pageTurnPreviousLocation = null
+}
+
+function currentLocationSignature(): string | null {
+  const location = currentLocationState
+  if (!location?.start) return currentCfi.value
+
+  const index = location.start.index ?? ''
+  const displayedPage = location.start.displayed?.page ?? ''
+  const displayedTotal = location.start.displayed?.total ?? ''
+  const cfi = location.start.cfi ?? ''
+
+  return `${index}:${displayedPage}:${displayedTotal}:${cfi}`
+}
+
+function prepareTtsPageTurnResume(): void {
+  logTtsDebug('prepare-page-turn-resume')
+  cancelSpeechOutput()
+  selectedStartBlockCfi.value = null
+  currentSpokenBlockCfi.value = null
+  ttsUsingFallback.value = false
+  pendingPageTurnResume = true
+  pageTurnPreviousLocation = currentLocationSignature()
+  syncBlockMarkers()
+}
+
+async function turnPage(direction: 'next' | 'prev'): Promise<void> {
+  const shouldResumeTts = ttsMode.value === 'speaking'
+  const atBoundary =
+    direction === 'next' ? currentLocationState?.atEnd === true : currentLocationState?.atStart === true
+
+  logTtsDebug('turn-page:start', { direction, shouldResumeTts, atBoundary })
+
+  if (shouldResumeTts && !atBoundary) {
+    prepareTtsPageTurnResume()
+  } else {
+    internalStopTts({ preserveSelected: false })
+  }
+
+  try {
+    if (direction === 'next') {
+      await rendition?.next()
+    } else {
+      await rendition?.prev()
+    }
+    logTtsDebug('turn-page:await-complete', { direction })
+  } catch {
+    logTtsDebug('turn-page:error', { direction })
+    if (shouldResumeTts) internalStopTts({ preserveSelected: false })
+  }
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -632,14 +809,38 @@ function hasNestedReadableDescendant(element: HTMLElement): boolean {
   return normalizeText(nested.innerText || nested.textContent || '').length > 0
 }
 
+function elementStartRect(element: HTMLElement): DOMRect {
+  const clientRects = Array.from(element.getClientRects())
+  const firstRect = clientRects.find((rect) => rect.width > 0 && rect.height > 0)
+  return firstRect ?? element.getBoundingClientRect()
+}
+
 function isVisibleBlockElement(element: HTMLElement, contentsWindow: Window): boolean {
   const styles = contentsWindow.getComputedStyle(element)
   if (styles.display === 'none' || styles.visibility === 'hidden' || Number(styles.opacity) === 0) {
     return false
   }
 
-  const rect = element.getBoundingClientRect()
+  const rect = elementStartRect(element)
   if (rect.width <= 0 || rect.height <= 0) return false
+
+  const frameElement = contentsWindow.frameElement as Element | null
+  const readerRect = epubContainer.value?.getBoundingClientRect()
+
+  if (frameElement && readerRect) {
+    const frameRect = frameElement.getBoundingClientRect()
+    const absoluteLeft = frameRect.left + rect.left
+    const absoluteRight = frameRect.left + rect.right
+    const absoluteTop = frameRect.top + rect.top
+    const absoluteBottom = frameRect.top + rect.bottom
+
+    const horizontalOverlap =
+      Math.min(absoluteRight, readerRect.right) - Math.max(absoluteLeft, readerRect.left)
+    const verticalOverlap =
+      Math.min(absoluteBottom, readerRect.bottom) - Math.max(absoluteTop, readerRect.top)
+
+    return horizontalOverlap > 12 && verticalOverlap > 8
+  }
 
   const horizontalOverlap = Math.min(rect.right, contentsWindow.innerWidth) - Math.max(rect.left, 0)
   const verticalOverlap = Math.min(rect.bottom, contentsWindow.innerHeight) - Math.max(rect.top, 0)
@@ -694,6 +895,18 @@ function buildFallbackPageText(): string {
   )
 }
 
+function isBlockInCurrentLocation(cfi: string): boolean {
+  const startCfi = currentLocationState?.start?.cfi
+  const endCfi = currentLocationState?.end?.cfi
+  if (!rendition || !startCfi || !endCfi) return true
+
+  try {
+    return rendition.epubcfi.compare(cfi, startCfi) >= 0 && rendition.epubcfi.compare(cfi, endCfi) <= 0
+  } catch {
+    return true
+  }
+}
+
 function refreshVisibleBlocks(): void {
   const contentsList = getRenderedContents().sort((left, right) => left.sectionIndex - right.sectionIndex)
   clearBlockMarkers(contentsList)
@@ -715,6 +928,7 @@ function refreshVisibleBlocks(): void {
 
       const cfi = blockCfiFromElement(contents, element)
       if (!cfi) continue
+      if (!isBlockInCurrentLocation(cfi)) continue
 
       nextBlocks.push({
         cfi,
@@ -728,6 +942,12 @@ function refreshVisibleBlocks(): void {
 
   visibleBlocks.value = nextBlocks
   fallbackPageText.value = nextBlocks.length > 0 ? '' : buildFallbackPageText()
+  logTtsDebug('refresh-visible-blocks', {
+    contentsCount: contentsList.length,
+    nextBlocks: nextBlocks.length,
+    firstBlockCfi: nextBlocks[0]?.cfi ?? null,
+    lastBlockCfi: nextBlocks.length > 0 ? nextBlocks[nextBlocks.length - 1].cfi : null,
+  })
 
   if (selectedStartBlockCfi.value && !nextBlocks.some((block) => block.cfi === selectedStartBlockCfi.value)) {
     selectedStartBlockCfi.value = null
@@ -742,7 +962,10 @@ function refreshVisibleBlocks(): void {
     !ttsUsingFallback.value &&
     !nextBlocks.some((block) => block.cfi === currentSpokenBlockCfi.value)
   ) {
-    if (pendingAutoAdvance) {
+    logTtsDebug('current-block-no-longer-visible', {
+      currentSpokenBlockCfi: currentSpokenBlockCfi.value,
+    })
+    if (pendingPageTurnResume) {
       currentSpokenBlockCfi.value = null
     } else {
       internalStopTts({ preserveSelected: true })
@@ -751,10 +974,18 @@ function refreshVisibleBlocks(): void {
 
   syncBlockMarkers()
 
-  if (pendingAutoAdvance && currentCfi.value !== autoAdvancePreviousCfi) {
-    pendingAutoAdvance = false
-    autoAdvancePreviousCfi = null
-    void startTts()
+  if (
+    pendingPageTurnResume &&
+    currentLocationSignature() !== pageTurnPreviousLocation &&
+    hasReadableText.value
+  ) {
+    logTtsDebug('resume-after-page-turn')
+    clearPendingPageTurnResume()
+    if (visibleBlocks.value.length > 0) {
+      speakBlockAtIndex(0)
+    } else {
+      speakFallbackPageText()
+    }
   }
 }
 
@@ -795,6 +1026,7 @@ function clearAutoAdvanceTimer(): void {
 }
 
 function cancelSpeechOutput(): void {
+  logTtsDebug('cancel-speech-output')
   speechToken += 1
   clearAutoAdvanceTimer()
   if (ttsSupported.value) window.speechSynthesis.cancel()
@@ -821,9 +1053,9 @@ function activeBlockIndex(): number {
 }
 
 function internalStopTts(options: StopTtsOptions = {}): void {
+  logTtsDebug('internal-stop-tts', { preserveSelected: options.preserveSelected ?? false })
   cancelSpeechOutput()
-  pendingAutoAdvance = false
-  autoAdvancePreviousCfi = null
+  clearPendingPageTurnResume()
   ttsMode.value = 'idle'
   ttsUsingFallback.value = false
   currentSpokenBlockCfi.value = null
@@ -832,10 +1064,16 @@ function internalStopTts(options: StopTtsOptions = {}): void {
 }
 
 function stopTts(): void {
+  logTtsDebug('stop-tts')
   internalStopTts({ preserveSelected: true })
 }
 
 function handleTtsError(error: string): void {
+  logTtsDebug('tts-error', { error })
+  if (pendingPageTurnResume && (error === 'interrupted' || error === 'canceled')) {
+    return
+  }
+
   internalStopTts({ preserveSelected: true })
   if (error !== 'interrupted' && error !== 'canceled') {
     ttsError.value = `TTS error: ${error}`
@@ -847,6 +1085,10 @@ function speakFallbackPageText(): void {
   if (!ttsSupported.value || !text) return
 
   const token = speechToken + 1
+  logTtsDebug('speak-fallback:start', {
+    token,
+    textLength: text.length,
+  })
   cancelSpeechOutput()
   speechToken = token
 
@@ -862,6 +1104,7 @@ function speakFallbackPageText(): void {
   utterance.onend = () => {
     if (token !== speechToken) return
 
+    logTtsDebug('speak-fallback:end', { token })
     ttsUsingFallback.value = false
     if (ttsPrefs.autoAdvance) {
       void queueAutoAdvance()
@@ -873,6 +1116,7 @@ function speakFallbackPageText(): void {
 
   utterance.onerror = (event) => {
     if (token !== speechToken) return
+    logTtsDebug('speak-fallback:error', { token, error: event.error })
     handleTtsError(event.error)
   }
 
@@ -882,11 +1126,19 @@ function speakFallbackPageText(): void {
 function speakBlockAtIndex(index: number): void {
   const block = visibleBlocks.value[index]
   if (!block) {
+    logTtsDebug('speak-block:missing', { index })
     internalStopTts({ preserveSelected: true })
     return
   }
 
   const token = speechToken + 1
+  logTtsDebug('speak-block:start', {
+    index,
+    token,
+    blockCfi: block.cfi,
+    textLength: block.text.length,
+    preview: block.text.slice(0, 80),
+  })
   cancelSpeechOutput()
   speechToken = token
 
@@ -903,6 +1155,12 @@ function speakBlockAtIndex(index: number): void {
     if (token !== speechToken) return
 
     const nextIndex = index + 1
+    logTtsDebug('speak-block:end', {
+      index,
+      token,
+      nextIndex,
+      visibleBlockCount: visibleBlocks.value.length,
+    })
     if (nextIndex < visibleBlocks.value.length) {
       speakBlockAtIndex(nextIndex)
       return
@@ -919,6 +1177,7 @@ function speakBlockAtIndex(index: number): void {
 
   utterance.onerror = (event) => {
     if (token !== speechToken) return
+    logTtsDebug('speak-block:error', { index, token, error: event.error, blockCfi: block.cfi })
     handleTtsError(event.error)
   }
 
@@ -926,37 +1185,31 @@ function speakBlockAtIndex(index: number): void {
 }
 
 async function queueAutoAdvance(): Promise<void> {
+  logTtsDebug('queue-auto-advance:start', {
+    atEnd: currentLocationState?.atEnd ?? false,
+  })
   if (!rendition || currentLocationState?.atEnd) {
     internalStopTts({ preserveSelected: true })
     return
   }
 
-  selectedStartBlockCfi.value = null
-  currentSpokenBlockCfi.value = null
-  ttsUsingFallback.value = false
-  pendingAutoAdvance = true
-  autoAdvancePreviousCfi = currentCfi.value
-  syncBlockMarkers()
-
-  const previousCfi = currentCfi.value
+  prepareTtsPageTurnResume()
 
   autoAdvanceTimer = setTimeout(async () => {
     autoAdvanceTimer = null
 
     try {
+      logTtsDebug('queue-auto-advance:fire')
       await rendition?.next()
-      if (pendingAutoAdvance && currentCfi.value === previousCfi) {
-        pendingAutoAdvance = false
-        internalStopTts({ preserveSelected: false })
-      }
     } catch {
-      pendingAutoAdvance = false
+      logTtsDebug('queue-auto-advance:error')
       internalStopTts({ preserveSelected: false })
     }
   }, 250)
 }
 
 async function startTts(): Promise<void> {
+  logTtsDebug('start-tts')
   if (!ttsSupported.value || !hasReadableText.value || ttsMode.value === 'selecting') return
 
   ttsError.value = null
@@ -972,13 +1225,15 @@ async function startTts(): Promise<void> {
 function pauseTts(): void {
   if (ttsMode.value !== 'speaking') return
 
+  logTtsDebug('pause-tts')
   cancelSpeechOutput()
-  pendingAutoAdvance = false
+  clearPendingPageTurnResume()
   ttsMode.value = 'paused'
   syncBlockMarkers()
 }
 
 async function resumeTts(): Promise<void> {
+  logTtsDebug('resume-tts')
   if (ttsMode.value !== 'paused') return
 
   if (ttsUsingFallback.value || visibleBlocks.value.length === 0) {
@@ -1026,6 +1281,7 @@ function clearStartBlock(): void {
 function restartCurrentPlayback(): void {
   if (ttsMode.value !== 'speaking') return
 
+  logTtsDebug('restart-current-playback')
   if (ttsUsingFallback.value || visibleBlocks.value.length === 0) {
     speakFallbackPageText()
     return
@@ -1046,6 +1302,11 @@ function onSpeechSettingChange(): void {
 
 function onAutoAdvanceChange(): void {
   persistTtsPreferences()
+}
+
+function onReaderThemeChange(): void {
+  persistReaderPreferences()
+  applyReaderTheme()
 }
 
 function loadVoices(): void {
