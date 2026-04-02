@@ -1,5 +1,14 @@
 import client from './client'
-import type { AuthorSummary, Book, BookMetadata, BooksListResponse, GenreSummary, ReadingProgress } from '@/types'
+import type {
+  AuthorSummary,
+  Book,
+  BookMetadata,
+  BooksListResponse,
+  GenreSummary,
+  ReaderManifest,
+  ReaderSection,
+  ReadingProgress,
+} from '@/types'
 
 export interface ListParams {
   search?: string
@@ -78,15 +87,36 @@ export async function getProgress(bookId: string): Promise<{ progress: ReadingPr
   return data
 }
 
-export async function saveProgress(
-  bookId: string,
-  cfi: string,
-  percentage: number,
-  rating?: number,
-): Promise<{ progress: ReadingProgress }> {
-  const body: Record<string, unknown> = { cfi, percentage }
-  if (rating !== undefined) body.rating = rating
+export interface SaveProgressPayload {
+  section_id: string
+  section_progress: number
+  block_index?: number | null
+  percentage: number
+  rating?: number
+}
+
+export async function saveProgress(bookId: string, payload: SaveProgressPayload): Promise<{ progress: ReadingProgress }> {
+  const body: Record<string, unknown> = {
+    section_id: payload.section_id,
+    section_progress: payload.section_progress,
+    percentage: payload.percentage,
+  }
+  if (payload.block_index !== undefined) body.block_index = payload.block_index
+  if (payload.rating !== undefined) body.rating = payload.rating
   const { data } = await client.put(`/books/${bookId}/progress`, body)
+  return data
+}
+
+export async function getReaderManifest(bookId: string): Promise<{ manifest: ReaderManifest }> {
+  const { data } = await client.get(`/books/${bookId}/reader/manifest`)
+  return data
+}
+
+export async function getReaderSection(
+  bookId: string,
+  sectionId: string,
+): Promise<{ section: ReaderSection }> {
+  const { data } = await client.get(`/books/${bookId}/reader/sections/${encodeURIComponent(sectionId)}`)
   return data
 }
 

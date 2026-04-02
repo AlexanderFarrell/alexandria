@@ -30,7 +30,7 @@ func New(
 	return &App{
 		Auth:     services.NewAuthService(userRepo, cfg),
 		Books:    services.NewBookService(bookRepo, store, parser, cfg),
-		Reader:   services.NewReaderService(progressRepo),
+		Reader:   services.NewReaderService(progressRepo, bookRepo, cfg),
 		Lists:    services.NewListService(listRepo),
 		Metadata: services.NewMetadataService(metadataProviders),
 	}

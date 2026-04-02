@@ -25,7 +25,11 @@ docker compose up --build
 
 Open [http://localhost:8080](http://localhost:8080), create the owner account, then sign in and upload your first book.
 
+The default Compose setup stores uploads and SQLite data in a Docker-managed volume named `alexandria-data`, so startup does not depend on host `./data` permissions.
+
 `REGISTRATION_MODE=single` is the default. The first successful registration bootstraps the deployment, and additional public registrations are blocked.
+
+If you want a host bind mount instead, change the volume in [docker-compose.yml](/home/alexander/Projects/alexandria/docker-compose.yml) back to `./data:/data` and make sure that directory is writable by the container user.
 
 ---
 

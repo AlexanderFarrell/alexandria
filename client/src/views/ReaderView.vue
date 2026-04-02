@@ -1,5 +1,5 @@
 <template>
-  <div class="reader-page">
+  <div class="reader-page" :style="shellStyle">
     <NavBar compact-mobile />
 
     <div class="reader-body">
@@ -8,139 +8,209 @@
         :class="{ 'is-epub-reader': ttsSupported && book?.file_type === 'epub' }"
         v-show="!loading && !epubError"
       >
-        <button class="btn-ghost back-btn" @click="$router.back()">← Library</button>
+        <div class="reader-heading">
+          <button class="btn-ghost back-btn" @click="$router.back()">← Library</button>
 
-        <div class="book-info">
-          <span class="book-title">{{ book?.title }}</span>
-          <span class="book-author" v-if="book?.author">{{ book.author }}</span>
+          <div class="book-info">
+            <span class="book-title" :title="book?.title">{{ book?.title }}</span>
+            <div
+              v-if="book?.author || (book?.file_type === 'epub' && currentSection)"
+              class="book-meta"
+            >
+              <span v-if="book?.author" class="book-author" :title="book.author">{{ book.author }}</span>
+              <span
+                v-if="book?.author && book?.file_type === 'epub' && currentSection"
+                class="book-meta-divider"
+              >
+                ·
+              </span>
+              <span
+                v-if="book?.file_type === 'epub' && currentSection"
+                class="book-section"
+                :title="currentSection.title"
+              >
+                {{ currentSection.title }}
+              </span>
+            </div>
+          </div>
         </div>
 
-        <div v-if="ttsSupported && book?.file_type === 'epub'" class="tts-toolbar">
-          <span class="tts-status" :class="ttsStatusClass">
-            <span class="tts-status-full">{{ ttsStatusLabel }}</span>
-            <span class="tts-status-compact">{{ ttsStatusCompactLabel }}</span>
-          </span>
-          <button
-            class="btn-ghost tts-btn tts-control"
-            :class="{ 'is-active': ttsMode === 'speaking' || ttsMode === 'paused' }"
-            :disabled="!canStartTts"
-            :aria-label="ttsBtnLabel"
-            :title="ttsBtnLabel"
-            @click="toggleTts"
-          >
-            <span class="tts-control-icon" aria-hidden="true">{{ ttsBtnIcon }}</span>
-            <span class="tts-control-label">{{ ttsBtnLabel }}</span>
-          </button>
-          <button
-            class="btn-ghost tts-control"
-            :disabled="ttsMode === 'idle'"
-            aria-label="Stop"
-            title="Stop"
-            @click="stopTts"
-          >
-            <span class="tts-control-icon" aria-hidden="true">■</span>
-            <span class="tts-control-label">Stop</span>
-          </button>
-          <button
-            class="btn-ghost tts-control"
-            :class="{ 'is-active': ttsMode === 'selecting' }"
-            :disabled="!canChooseParagraph"
-            :aria-label="chooseParagraphLabel"
-            :title="chooseParagraphLabel"
-            @click="toggleParagraphPicker"
-          >
-            <span class="tts-control-icon" aria-hidden="true">{{ chooseParagraphIcon }}</span>
-            <span class="tts-control-label">{{ chooseParagraphLabel }}</span>
-          </button>
-          <button
-            class="btn-ghost tts-control"
-            :class="{ 'is-active': ttsSettingsOpen }"
-            :aria-label="settingsBtnLabel"
-            :title="settingsBtnLabel"
-            @click="ttsSettingsOpen = !ttsSettingsOpen"
-          >
-            <span class="tts-control-icon" aria-hidden="true">⚙</span>
-            <span class="tts-control-label">{{ settingsBtnLabel }}</span>
+        <div v-if="book?.file_type === 'epub'" class="reader-toolbar">
+          <button class="btn-ghost toolbar-btn nav-toggle" @click="toggleNav">
+            <span class="label-desktop">{{ navButtonLabel }}</span>
+            <span class="label-mobile">{{ navButtonCompactLabel }}</span>
           </button>
 
-          <div v-if="selectedStartBlockIndex >= 0" class="tts-start-chip">
-            <span>Start: paragraph {{ selectedStartBlockIndex + 1 }}</span>
-            <button class="btn-ghost btn-inline" @click="clearStartBlock">Clear</button>
+          <button
+            v-if="ttsSupported"
+            class="btn-ghost toolbar-btn"
+            :class="{ 'is-active': ttsMode === 'speaking' || ttsMode === 'paused' }"
+            :disabled="!canStartTts"
+            :title="ttsButtonLabel"
+            @click="toggleTts"
+          >
+            <span class="label-desktop">{{ ttsButtonLabel }}</span>
+            <span class="label-mobile">{{ ttsButtonCompactLabel }}</span>
+          </button>
+          <button
+            v-if="ttsSupported"
+            class="btn-ghost toolbar-btn toolbar-btn-secondary"
+            :disabled="ttsMode === 'idle'"
+            @click="stopTts"
+          >
+            Stop
+          </button>
+          <button
+            v-if="ttsSupported"
+            class="btn-ghost toolbar-btn toolbar-btn-secondary"
+            :class="{ 'is-active': ttsMode === 'selecting' }"
+            :disabled="!canChooseParagraph"
+            @click="toggleParagraphPicker"
+          >
+            {{ chooseParagraphLabel }}
+          </button>
+
+          <div class="progress-chip" :title="progressChipTitle">
+            <span class="progress-chip-value">{{ currentPercentage }}%</span>
+            <span v-if="currentSectionPositionLabel" class="progress-chip-detail">
+              {{ currentSectionPositionLabel }}
+            </span>
           </div>
+
+          <button
+            class="btn-ghost toolbar-btn"
+            :class="{ 'is-active': settingsOpen }"
+            @click="toggleSettings"
+          >
+            Settings
+          </button>
         </div>
       </div>
 
       <div
-        v-if="ttsSupported && ttsSettingsOpen && !loading && !epubError && book?.file_type === 'epub'"
-        class="tts-settings-panel"
+        v-if="book?.file_type === 'epub' && settingsOpen && !loading && !epubError"
+        class="reader-settings-shell"
       >
-        <label class="tts-field">
-          <span class="tts-field-label">Voice</span>
-          <select v-model="selectedVoiceUri" class="tts-select" @change="onVoiceChange">
-            <option value="">Default system voice</option>
-            <option v-for="voice in voiceOptions" :key="voice.voiceURI" :value="voice.voiceURI">
-              {{ formatVoiceLabel(voice) }}
-            </option>
-          </select>
-        </label>
+        <button
+          class="reader-settings-backdrop"
+          type="button"
+          aria-label="Close settings"
+          @click="settingsOpen = false"
+        ></button>
 
-        <label class="tts-field">
-          <span class="tts-field-label">Rate</span>
-          <div class="tts-slider-wrap">
-            <span class="tts-slider-value">{{ ttsPrefs.rate.toFixed(1) }}×</span>
-            <input
-              v-model.number="ttsPrefs.rate"
-              class="tts-slider"
-              type="range"
-              min="0.5"
-              max="2"
-              step="0.1"
-              @change="onSpeechSettingChange"
-            />
+        <div class="reader-settings" role="dialog" aria-modal="true" aria-label="Reader settings">
+          <div class="reader-settings-header">
+            <div>
+              <span class="settings-kicker">Reader</span>
+              <h2>Settings</h2>
+            </div>
+            <button class="btn-ghost settings-close" @click="settingsOpen = false">Close</button>
           </div>
-        </label>
 
-        <label class="tts-field">
-          <span class="tts-field-label">Pitch</span>
-          <div class="tts-slider-wrap">
-            <span class="tts-slider-value">{{ ttsPrefs.pitch.toFixed(1) }}</span>
-            <input
-              v-model.number="ttsPrefs.pitch"
-              class="tts-slider"
-              type="range"
-              min="0"
-              max="2"
-              step="0.1"
-              @change="onSpeechSettingChange"
-            />
-          </div>
-        </label>
+          <section v-if="ttsSupported" class="settings-group reader-mobile-actions">
+            <h3>Quick actions</h3>
+            <div class="settings-action-row">
+              <button class="btn-ghost toolbar-btn" :disabled="ttsMode === 'idle'" @click="stopTts">
+                Stop
+              </button>
+              <button
+                class="btn-ghost toolbar-btn"
+                :class="{ 'is-active': ttsMode === 'selecting' }"
+                :disabled="!canChooseParagraph"
+                @click="toggleParagraphPickerFromSettings"
+              >
+                {{ chooseParagraphLabel }}
+              </button>
+            </div>
+          </section>
 
-        <label class="tts-field">
-          <span class="tts-field-label">Volume</span>
-          <div class="tts-slider-wrap">
-            <span class="tts-slider-value">{{ Math.round(ttsPrefs.volume * 100) }}%</span>
-            <input
-              v-model.number="ttsPrefs.volume"
-              class="tts-slider"
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              @change="onSpeechSettingChange"
-            />
-          </div>
-        </label>
+          <section class="settings-group">
+            <h3>Theme</h3>
+            <div class="theme-preset-row">
+              <button
+                v-for="preset in themePresets"
+                :key="preset"
+                class="theme-chip"
+                :class="{ 'is-active': readerPrefs.themePreset === preset }"
+                @click="setThemePreset(preset)"
+              >
+                {{ themePresetLabel(preset) }}
+              </button>
+            </div>
 
-        <label class="tts-checkbox">
-          <input v-model="ttsPrefs.autoAdvance" type="checkbox" @change="onAutoAdvanceChange" />
-          <span>Auto-scroll while reading</span>
-        </label>
+            <div v-if="readerPrefs.themePreset === 'custom'" class="theme-grid">
+              <label v-for="field in themeFields" :key="field.key" class="theme-field">
+                <span>{{ field.label }}</span>
+                <input
+                  v-model="readerPrefs.customTheme[field.key]"
+                  type="color"
+                  @change="persistReaderPreferencesAndApplyTheme"
+                />
+              </label>
+            </div>
+          </section>
 
-        <label class="tts-checkbox">
-          <input v-model="readerPrefs.darkMode" type="checkbox" @change="onReaderThemeChange" />
-          <span>Dark reader mode</span>
-        </label>
+          <section v-if="ttsSupported" class="settings-group">
+            <h3>Read Aloud</h3>
+
+            <label class="tts-field">
+              <span>Voice</span>
+              <select v-model="selectedVoiceUri" class="tts-select" @change="onVoiceChange">
+                <option value="">Default system voice</option>
+                <option v-for="voice in voiceOptions" :key="voice.voiceURI" :value="voice.voiceURI">
+                  {{ formatVoiceLabel(voice) }}
+                </option>
+              </select>
+            </label>
+
+            <label class="tts-field">
+              <span>Rate</span>
+              <input
+                v-model.number="ttsPrefs.rate"
+                class="tts-slider"
+                type="range"
+                min="0.5"
+                max="2"
+                step="0.1"
+                @change="onSpeechSettingChange"
+              />
+              <strong>{{ ttsPrefs.rate.toFixed(1) }}×</strong>
+            </label>
+
+            <label class="tts-field">
+              <span>Pitch</span>
+              <input
+                v-model.number="ttsPrefs.pitch"
+                class="tts-slider"
+                type="range"
+                min="0"
+                max="2"
+                step="0.1"
+                @change="onSpeechSettingChange"
+              />
+              <strong>{{ ttsPrefs.pitch.toFixed(1) }}</strong>
+            </label>
+
+            <label class="tts-field">
+              <span>Volume</span>
+              <input
+                v-model.number="ttsPrefs.volume"
+                class="tts-slider"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                @change="onSpeechSettingChange"
+              />
+              <strong>{{ Math.round(ttsPrefs.volume * 100) }}%</strong>
+            </label>
+
+            <label class="tts-checkbox">
+              <input v-model="ttsPrefs.autoAdvance" type="checkbox" @change="onAutoAdvanceChange" />
+              <span>Auto-advance to the next section</span>
+            </label>
+          </section>
+        </div>
       </div>
 
       <p
@@ -189,80 +259,91 @@
         </div>
       </div>
 
-      <div
-        ref="epubContainer"
-        class="epub-container"
-        :style="{
-          visibility: (loading || epubError || (book && book.file_type !== 'epub')) ? 'hidden' : 'visible',
-          background: readerPrefs.darkMode ? '#111318' : '#ffffff',
-        }"
-      ></div>
+      <div v-else class="reader-shell">
+        <div class="reader-scrim" :class="{ 'is-visible': navOpen }" @click="navOpen = false"></div>
 
-      <div class="reader-footer" v-show="!loading && !epubError && book?.file_type === 'epub'">
-        <button class="btn-ghost nav-btn" @click="prevPage">↑ Up</button>
-        <div class="progress-wrap">
-          <div class="progress-track">
-            <div class="progress-fill" :style="{ width: currentPercentage + '%' }"></div>
+        <aside class="reader-sidebar" :class="{ 'is-open': navOpen }">
+          <div class="sidebar-header">
+            <h2>Contents</h2>
+            <button class="btn-ghost sidebar-close" @click="navOpen = false">Close</button>
           </div>
-          <span class="progress-label">{{ currentPercentage }}%</span>
-        </div>
-        <button class="btn-ghost nav-btn" @click="nextPage">↓ Down</button>
+          <ReaderNavTree
+            v-if="manifest"
+            :items="manifest.nav"
+            :active-section-id="currentSectionId"
+            :active-fragment="currentFragment"
+            @navigate="navigateToSection"
+          />
+          <p v-else class="sidebar-empty">No section navigation found.</p>
+        </aside>
+
+        <main class="reader-main">
+          <div class="reader-frame-wrap">
+            <div v-if="sectionLoading" class="frame-loading">
+              <div class="spinner"></div>
+            </div>
+            <iframe
+              ref="readerFrame"
+              class="reader-frame"
+              sandbox="allow-same-origin"
+              :srcdoc="currentSection?.html ?? ''"
+              title="EPUB section reader"
+              @load="onFrameLoad"
+            />
+          </div>
+
+          <div class="reader-footer">
+            <button
+              class="btn-ghost nav-btn"
+              :disabled="!currentSection?.prev_section_id || sectionLoading"
+              @click="goToPreviousSection"
+            >
+              ← Previous
+            </button>
+
+            <div class="progress-wrap">
+              <div class="progress-track">
+                <div class="progress-fill" :style="{ width: `${currentPercentage}%` }"></div>
+              </div>
+              <span class="progress-label">
+                {{ currentPercentage }}% · {{ currentSectionPositionLabel }}
+              </span>
+            </div>
+
+            <button
+              class="btn-ghost nav-btn"
+              :disabled="!currentSection?.next_section_id || sectionLoading"
+              @click="goToNextSection"
+            >
+              Next →
+            </button>
+          </div>
+        </main>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, shallowRef } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import Epub from 'epubjs'
-import type { Book as EpubBook, Contents, Location, Rendition } from 'epubjs'
 import NavBar from '@/components/NavBar.vue'
+import ReaderNavTree from '@/components/reader/ReaderNavTree.vue'
+import { getContentBlob, getReaderManifest, getReaderSection } from '@/api/books'
 import { useBooksStore } from '@/stores/books'
-import client from '@/api/client'
-import { getContentBlob } from '@/api/books'
+import type { ReaderManifest, ReaderSection } from '@/types'
 
 const READABLE_BLOCK_SELECTOR = 'p, li, blockquote, dd, dt, figcaption, h1, h2, h3, h4, h5, h6'
 const TTS_PREFS_KEY = 'alexandria.reader.tts'
 const READER_PREFS_KEY = 'alexandria.reader.display'
-const TTS_STYLE_KEY = 'alexandria-reader-tts'
 const TTS_BLOCK_ATTR = 'data-tts-block-id'
 const TTS_SELECTED_ATTR = 'data-tts-selected'
 const TTS_ACTIVE_ATTR = 'data-tts-active'
 const TTS_SELECTING_CLASS = 'alexandria-tts-selecting'
-const READER_THEME_LIGHT = 'alexandria-reader-light'
-const READER_THEME_DARK = 'alexandria-reader-dark'
-const TTS_VIEWPORT_OVERSCAN_PX = 260
-const TTS_HORIZONTAL_OVERSCAN_PX = 24
-const EPUB_SECTION_OVERSCAN_PX = 1200
-const EPUB_SECTION_OVERSCAN_DELTA_PX = 480
-const TTS_IFRAME_STYLES = `
-  [${TTS_BLOCK_ATTR}] {
-    transition: background-color 0.16s ease, box-shadow 0.16s ease, outline-color 0.16s ease;
-    border-radius: 0.3rem;
-  }
-
-  body.${TTS_SELECTING_CLASS} [${TTS_BLOCK_ATTR}] {
-    cursor: pointer;
-  }
-
-  body.${TTS_SELECTING_CLASS} [${TTS_BLOCK_ATTR}]:hover {
-    background: rgba(200, 169, 110, 0.14);
-    outline: 1px solid rgba(200, 169, 110, 0.45);
-  }
-
-  [${TTS_SELECTED_ATTR}] {
-    background: rgba(200, 169, 110, 0.12);
-    outline: 1px solid rgba(200, 169, 110, 0.4);
-  }
-
-  [${TTS_ACTIVE_ATTR}] {
-    background: rgba(200, 169, 110, 0.22);
-    box-shadow: inset 0 0 0 1px rgba(200, 169, 110, 0.65);
-  }
-`
+const THEME_STYLE_ID = 'alexandria-reader-theme'
 
 type TtsMode = 'idle' | 'speaking' | 'paused' | 'selecting'
+type ThemePreset = 'light' | 'dark' | 'custom'
 
 interface TtsPreferences {
   voiceURI: string
@@ -272,71 +353,89 @@ interface TtsPreferences {
   autoAdvance: boolean
 }
 
-interface ReadableBlock {
-  cfi: string
+interface ThemePalette {
+  pageBackground: string
   text: string
-  sectionIndex: number
-  element: HTMLElement
-  contents: Contents
-  inViewport: boolean
+  muted: string
+  accent: string
+  link: string
+  highlight: string
 }
 
 interface ReaderPreferences {
-  darkMode: boolean
+  themePreset: ThemePreset
+  customTheme: ThemePalette
 }
 
-interface StopTtsOptions {
-  preserveSelected?: boolean
+interface PendingRestoreState {
+  sectionProgress: number
+  blockIndex: number | null
+  fragment: string
 }
 
-type ReaderRenditionOptions = NonNullable<Parameters<EpubBook['renderTo']>[1]> & {
-  method: 'blobUrl'
-  offset: number
-  offsetDelta: number
+const themePresets: ThemePreset[] = ['light', 'dark', 'custom']
+const themeFields: Array<{ key: keyof ThemePalette; label: string }> = [
+  { key: 'pageBackground', label: 'Page' },
+  { key: 'text', label: 'Text' },
+  { key: 'muted', label: 'Muted' },
+  { key: 'accent', label: 'Accent' },
+  { key: 'link', label: 'Link' },
+  { key: 'highlight', label: 'Highlight' },
+]
+
+const presetThemes: Record<Exclude<ThemePreset, 'custom'>, ThemePalette> = {
+  light: {
+    pageBackground: '#f8f3ea',
+    text: '#1c1917',
+    muted: '#6d655d',
+    accent: '#8a6734',
+    link: '#765623',
+    highlight: '#d5b989',
+  },
+  dark: {
+    pageBackground: '#111318',
+    text: '#efe7db',
+    muted: '#b4aaa0',
+    accent: '#d7b777',
+    link: '#e4c989',
+    highlight: '#7f6533',
+  },
 }
 
 const route = useRoute()
 const books = useBooksStore()
 
-const epubContainer = ref<HTMLDivElement | null>(null)
-
-let epubBook: EpubBook | null = null
-let rendition: Rendition | null = null
-let currentLocationState: Location | null = null
-let saveTimer: ReturnType<typeof setTimeout> | null = null
-let refreshBlocksFrame: number | null = null
-let autoAdvanceTimer: ReturnType<typeof setTimeout> | null = null
-let speechToken = 0
-let pendingPageTurnResume = false
-let pageTurnPreviousLocation: string | null = null
-
-const contentCleanups = new Map<Document, () => void>()
+const readerFrame = ref<HTMLIFrameElement | null>(null)
 
 const loading = ref(true)
+const sectionLoading = ref(false)
 const epubError = ref<string | null>(null)
 const downloadError = ref<string | null>(null)
 const pdfBlobUrl = ref<string | null>(null)
-const ttsError = ref<string | null>(null)
-const currentPercentage = ref(0)
-const currentCfi = ref<string | null>(null)
 const downloading = ref(false)
+
+const manifest = ref<ReaderManifest | null>(null)
+const currentSection = ref<ReaderSection | null>(null)
+const currentSectionId = ref('')
+const currentFragment = ref('')
+const currentPercentage = ref(0)
+const navOpen = ref(false)
+const settingsOpen = ref(false)
 
 const ttsSupported = ref(false)
 const ttsMode = ref<TtsMode>('idle')
-const ttsSettingsOpen = ref(false)
-const visibleBlocks = shallowRef<ReadableBlock[]>([])
-const fallbackPageText = ref('')
+const ttsError = ref<string | null>(null)
 const availableVoices = shallowRef<SpeechSynthesisVoice[]>([])
-const selectedStartBlockCfi = ref<string | null>(null)
-const currentSpokenBlockCfi = ref<string | null>(null)
-const ttsUsingFallback = ref(false)
+const readableBlocks = shallowRef<HTMLElement[]>([])
+const fallbackSectionText = ref('')
+const selectedStartBlockIndex = ref<number | null>(null)
+const currentSpokenBlockIndex = ref<number | null>(null)
 const ttsPrefs = reactive<TtsPreferences>(loadTtsPreferences())
 const readerPrefs = reactive<ReaderPreferences>(loadReaderPreferences())
 
 const book = computed(() => books.currentBook)
 const progress = computed(() => books.currentProgress)
 const preferredLanguage = computed(() => book.value?.metadata?.language ?? navigator.language ?? 'en')
-
 const voiceOptions = computed(() => {
   return [...availableVoices.value].sort((a, b) => compareVoices(a, b, preferredLanguage.value))
 })
@@ -346,109 +445,67 @@ const selectedVoiceUri = computed({
     const match = availableVoices.value.some((voice) => voice.voiceURI === ttsPrefs.voiceURI)
     return match ? ttsPrefs.voiceURI : ''
   },
-  set: (voiceURI: string) => {
-    ttsPrefs.voiceURI = voiceURI
+  set: (value: string) => {
+    ttsPrefs.voiceURI = value
   },
 })
 
-const selectedStartBlockIndex = computed(() => {
-  if (!selectedStartBlockCfi.value) return -1
-  return visibleBlocks.value.findIndex((block) => block.cfi === selectedStartBlockCfi.value)
-})
-
-const currentSpokenBlockIndex = computed(() => {
-  if (!currentSpokenBlockCfi.value) return -1
-  return visibleBlocks.value.findIndex((block) => block.cfi === currentSpokenBlockCfi.value)
-})
-
-const hasVisibleBlocks = computed(() => visibleBlocks.value.length > 0)
-const hasReadableText = computed(() => hasVisibleBlocks.value || fallbackPageText.value.length > 0)
+const hasReadableText = computed(() => readableBlocks.value.length > 0 || fallbackSectionText.value.length > 0)
 const canStartTts = computed(() => ttsMode.value !== 'selecting' && hasReadableText.value)
-const canChooseParagraph = computed(() => hasVisibleBlocks.value)
-const TTS_DEBUG = false
-
-const ttsBtnLabel = computed(() => {
+const canChooseParagraph = computed(() => readableBlocks.value.length > 0)
+const navButtonLabel = computed(() => (navOpen.value ? 'Hide Contents' : 'Contents'))
+const navButtonCompactLabel = computed(() => (navOpen.value ? 'Hide' : 'Contents'))
+const ttsButtonLabel = computed(() => {
   if (ttsMode.value === 'speaking') return 'Pause'
   if (ttsMode.value === 'paused') return 'Resume'
   return 'Read Aloud'
 })
-
-const ttsBtnIcon = computed(() => {
-  if (ttsMode.value === 'speaking') return '⏸'
-  return '▶'
+const ttsButtonCompactLabel = computed(() => {
+  if (ttsMode.value === 'speaking') return 'Pause'
+  if (ttsMode.value === 'paused') return 'Resume'
+  return 'Read'
+})
+const chooseParagraphLabel = computed(() => (
+  ttsMode.value === 'selecting' ? 'Cancel paragraph pick' : 'Choose paragraph'
+))
+const currentSectionPositionLabel = computed(() => {
+  if (!manifest.value || !currentSection.value) return ''
+  return `${currentSection.value.section_index + 1}/${manifest.value.sections.length}`
+})
+const progressChipTitle = computed(() => {
+  if (!currentSectionPositionLabel.value) return `${currentPercentage.value}% complete`
+  return `${currentPercentage.value}% complete · ${currentSectionPositionLabel.value}`
 })
 
-const chooseParagraphLabel = computed(() => {
-  return ttsMode.value === 'selecting' ? 'Cancel' : 'Choose paragraph'
+const activeTheme = computed<ThemePalette>(() => {
+  if (readerPrefs.themePreset === 'custom') return { ...readerPrefs.customTheme }
+  return { ...presetThemes[readerPrefs.themePreset] }
 })
 
-const chooseParagraphIcon = computed(() => {
-  return ttsMode.value === 'selecting' ? '✕' : '¶'
-})
+const shellStyle = computed(() => ({
+  '--reader-bg': mixColor(activeTheme.value.pageBackground, '#000000', 0.2),
+  '--reader-surface': activeTheme.value.pageBackground,
+  '--reader-text': activeTheme.value.text,
+  '--reader-muted': activeTheme.value.muted,
+  '--reader-accent': activeTheme.value.accent,
+  '--reader-link': activeTheme.value.link,
+  '--reader-highlight': activeTheme.value.highlight,
+  '--reader-border': hexToRgba(activeTheme.value.muted, 0.2),
+  '--reader-nav-active-bg': hexToRgba(activeTheme.value.highlight, 0.28),
+  '--reader-nav-active-text': activeTheme.value.text,
+}))
 
-const settingsBtnLabel = computed(() => {
-  return ttsSettingsOpen.value ? 'Hide settings' : 'Settings'
-})
-
-const ttsStatusLabel = computed(() => {
-  if (!hasReadableText.value) return 'No readable text'
-  if (ttsMode.value === 'selecting') return 'Choose a paragraph'
-  if (ttsMode.value === 'paused') {
-    return currentSpokenBlockIndex.value >= 0
-      ? `Paused on paragraph ${currentSpokenBlockIndex.value + 1}`
-      : 'Paused'
-  }
-  if (ttsMode.value === 'speaking') {
-    return currentSpokenBlockIndex.value >= 0
-      ? `Reading paragraph ${currentSpokenBlockIndex.value + 1}`
-      : 'Reading aloud'
-  }
-  return 'Ready'
-})
-
-const ttsStatusCompactLabel = computed(() => {
-  if (!hasReadableText.value) return 'No text'
-  if (ttsMode.value === 'selecting') return 'Pick start'
-  if (ttsMode.value === 'paused') return 'Paused'
-  if (ttsMode.value === 'speaking') return 'Reading'
-  return 'Ready'
-})
-
-const ttsStatusClass = computed(() => {
-  if (!hasReadableText.value) return 'is-disabled'
-  return `is-${ttsMode.value}`
-})
-
-function ttsDebugState(): Record<string, unknown> {
-  return {
-    mode: ttsMode.value,
-    currentCfi: currentCfi.value,
-    currentLocation: currentLocationSignature(),
-    pendingPageTurnResume,
-    pageTurnPreviousLocation,
-    visibleBlockCount: visibleBlocks.value.length,
-    fallbackTextLength: fallbackPageText.value.length,
-    currentSpokenBlockCfi: currentSpokenBlockCfi.value,
-    selectedStartBlockCfi: selectedStartBlockCfi.value,
-    usingFallback: ttsUsingFallback.value,
-    autoAdvance: ttsPrefs.autoAdvance,
-  }
-}
-
-function logTtsDebug(event: string, details: Record<string, unknown> = {}): void {
-  if (!TTS_DEBUG) return
-  console.debug(`[ReaderView TTS] ${event}`, {
-    ...details,
-    state: ttsDebugState(),
-  })
-}
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+let scrollFrame: number | null = null
+let speechToken = 0
+let autoAdvanceTimer: ReturnType<typeof setTimeout> | null = null
+let currentFrameCleanup: (() => void) | null = null
+let pendingRestore: PendingRestoreState | null = null
+let pendingTtsResume = false
+let currentSectionLoadToken = 0
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
-}
-
-function normalizeText(value: string): string {
-  return value.replace(/\s+/g, ' ').trim()
 }
 
 function parseNumberPreference(value: unknown, fallback: number): number {
@@ -474,7 +531,6 @@ function loadTtsPreferences(): TtsPreferences {
   try {
     const raw = window.localStorage.getItem(TTS_PREFS_KEY)
     if (!raw) return defaults
-
     const parsed = JSON.parse(raw) as Partial<TtsPreferences>
     return {
       voiceURI: typeof parsed.voiceURI === 'string' ? parsed.voiceURI : '',
@@ -488,17 +544,10 @@ function loadTtsPreferences(): TtsPreferences {
   }
 }
 
-function persistTtsPreferences(): void {
-  try {
-    window.localStorage.setItem(TTS_PREFS_KEY, JSON.stringify(ttsPrefs))
-  } catch {
-    // Ignore localStorage failures and keep the in-memory settings.
-  }
-}
-
 function loadReaderPreferences(): ReaderPreferences {
   const defaults: ReaderPreferences = {
-    darkMode: false,
+    themePreset: 'light',
+    customTheme: { ...presetThemes.light },
   }
 
   if (typeof window === 'undefined') return defaults
@@ -506,86 +555,81 @@ function loadReaderPreferences(): ReaderPreferences {
   try {
     const raw = window.localStorage.getItem(READER_PREFS_KEY)
     if (!raw) return defaults
-
-    const parsed = JSON.parse(raw) as Partial<ReaderPreferences>
+    const parsed = JSON.parse(raw) as Partial<ReaderPreferences> & { customTheme?: Partial<ThemePalette> }
+    const preset = parsed.themePreset === 'dark' || parsed.themePreset === 'custom' ? parsed.themePreset : 'light'
     return {
-      darkMode: Boolean(parsed.darkMode),
+      themePreset: preset,
+      customTheme: {
+        pageBackground: parsed.customTheme?.pageBackground || defaults.customTheme.pageBackground,
+        text: parsed.customTheme?.text || defaults.customTheme.text,
+        muted: parsed.customTheme?.muted || defaults.customTheme.muted,
+        accent: parsed.customTheme?.accent || defaults.customTheme.accent,
+        link: parsed.customTheme?.link || defaults.customTheme.link,
+        highlight: parsed.customTheme?.highlight || defaults.customTheme.highlight,
+      },
     }
   } catch {
     return defaults
   }
 }
 
-function persistReaderPreferences(): void {
+function persistTtsPreferences(): void {
+  try {
+    window.localStorage.setItem(TTS_PREFS_KEY, JSON.stringify(ttsPrefs))
+  } catch {
+    // Ignore storage failures and keep in-memory settings.
+  }
+}
+
+function persistReaderPreferencesAndApplyTheme(): void {
   try {
     window.localStorage.setItem(READER_PREFS_KEY, JSON.stringify(readerPrefs))
   } catch {
-    // Ignore localStorage failures and keep the in-memory settings.
+    // Ignore storage failures and keep in-memory settings.
+  }
+  applyFrameTheme()
+}
+
+function setThemePreset(preset: ThemePreset): void {
+  readerPrefs.themePreset = preset
+  persistReaderPreferencesAndApplyTheme()
+}
+
+function themePresetLabel(preset: ThemePreset): string {
+  switch (preset) {
+    case 'dark':
+      return 'Dark'
+    case 'custom':
+      return 'Custom'
+    default:
+      return 'Light'
   }
 }
 
-function readerThemeRules(darkMode: boolean): Record<string, Record<string, string>> {
-  const bodyRules = {
-    'font-family': 'Georgia, serif',
-    'font-size': 'clamp(1rem, 0.98rem + 0.2vw, 1.05rem)',
-    'line-height': '1.7',
-    padding: '0 clamp(0.95rem, 4vw, 2rem) 1.6rem',
-  }
-
-  if (darkMode) {
-    return {
-      body: {
-        ...bodyRules,
-        background: '#111318',
-        color: '#ece4d9',
-      },
-      a: {
-        color: '#d7b777',
-      },
-      'h1, h2, h3, h4, h5, h6, strong, b': {
-        color: '#f6efe5',
-      },
-      'img, svg, video, canvas': {
-        'max-width': '100%',
-        height: 'auto',
-      },
-      pre: {
-        'white-space': 'pre-wrap',
-      },
-    }
-  }
-
-  return {
-    body: {
-      ...bodyRules,
-      background: '#ffffff',
-      color: '#1a1a1a',
-    },
-    a: {
-      color: '#8b6a2f',
-    },
-    'h1, h2, h3, h4, h5, h6, strong, b': {
-      color: '#1a1a1a',
-    },
-    'img, svg, video, canvas': {
-      'max-width': '100%',
-      height: 'auto',
-    },
-    pre: {
-      'white-space': 'pre-wrap',
-    },
-  }
+function normalizeText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
 }
 
-function registerReaderThemes(): void {
-  if (!rendition) return
-  rendition.themes.register(READER_THEME_LIGHT, readerThemeRules(false))
-  rendition.themes.register(READER_THEME_DARK, readerThemeRules(true))
+function currentFrameDocument(): Document | null {
+  return readerFrame.value?.contentDocument ?? null
 }
 
-function applyReaderTheme(): void {
-  if (!rendition) return
-  rendition.themes.select(readerPrefs.darkMode ? READER_THEME_DARK : READER_THEME_LIGHT)
+function currentFrameWindow(): Window | null {
+  return readerFrame.value?.contentWindow ?? null
+}
+
+function currentScrollElement(): HTMLElement | null {
+  const doc = currentFrameDocument()
+  return (doc?.scrollingElement as HTMLElement | null) ?? doc?.documentElement ?? null
+}
+
+function currentFrameBody(): HTMLBodyElement | null {
+  return (currentFrameDocument()?.body as HTMLBodyElement | null) ?? null
+}
+
+function formatVoiceLabel(voice: SpeechSynthesisVoice): string {
+  const language = voice.lang || 'Unknown language'
+  return voice.default ? `${voice.name} (${language}, default)` : `${voice.name} (${language})`
 }
 
 function normalizeLanguageTag(value: string | undefined): string {
@@ -596,18 +640,13 @@ function baseLanguageTag(value: string | undefined): string {
   return normalizeLanguageTag(value).split('-')[0]
 }
 
-function compareVoices(
-  left: SpeechSynthesisVoice,
-  right: SpeechSynthesisVoice,
-  preferredLang: string,
-): number {
+function compareVoices(left: SpeechSynthesisVoice, right: SpeechSynthesisVoice, preferredLang: string): number {
   const preferred = normalizeLanguageTag(preferredLang)
   const preferredBase = baseLanguageTag(preferredLang)
 
   const score = (voice: SpeechSynthesisVoice) => {
     const voiceLang = normalizeLanguageTag(voice.lang)
     const voiceBase = baseLanguageTag(voice.lang)
-
     if (voiceLang === preferred) return 0
     if (voiceBase && voiceBase === preferredBase) return 1
     if (voice.default) return 2
@@ -621,17 +660,11 @@ function compareVoices(
   )
 }
 
-function formatVoiceLabel(voice: SpeechSynthesisVoice): string {
-  const language = voice.lang || 'Unknown language'
-  return voice.default ? `${voice.name} (${language}, default)` : `${voice.name} (${language})`
-}
-
 function buildDownloadFilename(title: string, fileType: string): string {
   const safeTitle = title
     .trim()
     .replace(/[\\/:*?"<>|]+/g, '-')
     .replace(/\s+/g, ' ')
-
   return `${safeTitle || 'book'}.${fileType}`
 }
 
@@ -640,18 +673,15 @@ async function downloadBook(): Promise<void> {
 
   downloadError.value = null
   downloading.value = true
-
   try {
     const blob = await getContentBlob(book.value.id)
     const objectUrl = URL.createObjectURL(blob)
     const link = document.createElement('a')
-
     link.href = objectUrl
     link.download = buildDownloadFilename(book.value.title, book.value.file_type)
     document.body.appendChild(link)
     link.click()
     link.remove()
-
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
   } catch {
     downloadError.value = 'Failed to download file.'
@@ -660,487 +690,528 @@ async function downloadBook(): Promise<void> {
   }
 }
 
-async function initEpub(arrayBuffer: ArrayBuffer): Promise<void> {
-  if (!epubContainer.value) throw new Error('epub container not mounted')
+async function loadReaderState(bookId: string): Promise<void> {
+  loading.value = true
+  epubError.value = null
+  currentSection.value = null
+  manifest.value = null
+  currentSectionId.value = ''
+  currentFragment.value = ''
+  navOpen.value = false
+  settingsOpen.value = false
+  cleanupCurrentFrame()
+  internalStopTts({ preserveSelected: false })
 
-  epubBook = Epub(arrayBuffer as unknown as string)
-  const renditionOptions: ReaderRenditionOptions = {
-    manager: 'continuous',
-    flow: 'scrolled-continuous',
-    spread: 'none',
-    width: '100%',
-    height: '100%',
-    offset: EPUB_SECTION_OVERSCAN_PX,
-    offsetDelta: EPUB_SECTION_OVERSCAN_DELTA_PX,
-    allowScriptedContent: false,
-    method: 'blobUrl',
+  try {
+    await Promise.all([books.fetchBook(bookId), books.fetchProgress(bookId)])
+  } catch {
+    epubError.value = 'Failed to load book metadata.'
+    loading.value = false
+    return
   }
-  rendition = epubBook.renderTo(epubContainer.value, renditionOptions)
 
-  registerReaderThemes()
-  applyReaderTheme()
+  if (pdfBlobUrl.value) {
+    URL.revokeObjectURL(pdfBlobUrl.value)
+    pdfBlobUrl.value = null
+  }
 
-  rendition.hooks.content.register((contents: Contents) => {
-    setupTtsContents(contents)
-    scheduleVisibleBlocksRefresh()
-  })
+  if (book.value?.file_type === 'pdf') {
+    loading.value = false
+    try {
+      const blob = await getContentBlob(bookId)
+      pdfBlobUrl.value = URL.createObjectURL(blob)
+    } catch {
+      // Non-fatal.
+    }
+    return
+  }
 
-  rendition.hooks.unloaded.register((view: { contents?: Contents }) => {
-    if (view.contents) teardownTtsContents(view.contents)
-  })
+  if (book.value?.file_type !== 'epub') {
+    loading.value = false
+    return
+  }
 
-  rendition.on('relocated', (location: Location) => {
-    currentLocationState = location
-    currentCfi.value = location?.start?.cfi ?? null
-    currentPercentage.value = Math.round((location?.start?.percentage ?? 0) * 100)
-    logTtsDebug('relocated', {
-      startCfi: location?.start?.cfi ?? null,
-      endCfi: location?.end?.cfi ?? null,
-      startPage: location?.start?.displayed?.page ?? null,
-      endPage: location?.end?.displayed?.page ?? null,
-      atStart: location?.atStart ?? false,
-      atEnd: location?.atEnd ?? false,
-    })
-    scheduleSaveProgress()
-    scheduleVisibleBlocksRefresh()
-  })
+  try {
+    const response = await getReaderManifest(bookId)
+    manifest.value = response.manifest
+  } catch {
+    epubError.value = 'Failed to load EPUB structure.'
+    loading.value = false
+    return
+  }
 
-  await rendition.display(progress.value?.cfi ?? undefined)
+  const initialSectionId = resolveInitialSectionId()
+  pendingRestore = {
+    sectionProgress: shouldRestoreSavedProgress(initialSectionId) ? progress.value?.section_progress ?? 0 : 0,
+    blockIndex: shouldRestoreSavedProgress(initialSectionId) ? progress.value?.block_index ?? null : null,
+    fragment: '',
+  }
+
+  await loadSection(initialSectionId)
   loading.value = false
-  scheduleVisibleBlocksRefresh()
 }
 
-function scheduleSaveProgress(): void {
+function shouldRestoreSavedProgress(sectionId: string): boolean {
+  return Boolean(progress.value?.section_id) && progress.value?.section_id === sectionId
+}
+
+function resolveInitialSectionId(): string {
+  const sections = manifest.value?.sections ?? []
+  if (sections.length === 0) return ''
+  if (progress.value?.section_id && sections.some((section) => section.id === progress.value?.section_id)) {
+    return progress.value.section_id
+  }
+  return manifest.value?.first_section_id || sections[0].id
+}
+
+async function loadSection(
+  sectionId: string,
+  options: { fragment?: string; resumeTts?: boolean; blockIndex?: number | null; sectionProgress?: number } = {},
+): Promise<void> {
+  if (!book.value || book.value.file_type !== 'epub' || !sectionId) return
+
+  if (currentSectionId.value === sectionId && currentSection.value) {
+    pendingRestore = {
+      sectionProgress: options.sectionProgress ?? 0,
+      blockIndex: options.blockIndex ?? null,
+      fragment: options.fragment ?? '',
+    }
+    if (pendingRestore.fragment) {
+      restoreFramePosition()
+    }
+    return
+  }
+
+  currentSectionLoadToken += 1
+  const token = currentSectionLoadToken
+  sectionLoading.value = true
+  if (!options.resumeTts) {
+    internalStopTts({ preserveSelected: false })
+  } else {
+    cancelSpeechOutput()
+    pendingTtsResume = true
+  }
+
+  try {
+    const response = await getReaderSection(book.value.id, sectionId)
+    if (token !== currentSectionLoadToken) return
+
+    currentSection.value = response.section
+    currentSectionId.value = response.section.id
+    currentFragment.value = ''
+    pendingRestore = {
+      sectionProgress: options.sectionProgress ?? 0,
+      blockIndex: options.blockIndex ?? null,
+      fragment: options.fragment ?? '',
+    }
+    navOpen.value = false
+  } catch {
+    if (token !== currentSectionLoadToken) return
+    epubError.value = 'Failed to load EPUB section.'
+  } finally {
+    if (token === currentSectionLoadToken) {
+      sectionLoading.value = false
+    }
+  }
+}
+
+function navigateToSection(sectionId: string, fragment?: string) {
+  void loadSection(sectionId, { fragment })
+}
+
+function toggleNav() {
+  const next = !navOpen.value
+  if (next) settingsOpen.value = false
+  navOpen.value = next
+}
+
+function toggleSettings() {
+  const next = !settingsOpen.value
+  if (next) navOpen.value = false
+  settingsOpen.value = next
+}
+
+function toggleParagraphPickerFromSettings() {
+  const enteringSelection = ttsMode.value !== 'selecting'
+  if (enteringSelection) settingsOpen.value = false
+  toggleParagraphPicker()
+}
+
+function goToPreviousSection() {
+  if (!currentSection.value?.prev_section_id) return
+  void loadSection(currentSection.value.prev_section_id)
+}
+
+function goToNextSection() {
+  if (!currentSection.value?.next_section_id) return
+  void loadSection(currentSection.value.next_section_id)
+}
+
+function onFrameLoad() {
+  cleanupCurrentFrame()
+  applyFrameTheme()
+  setupFrameInteractions()
+
+  window.requestAnimationFrame(() => {
+    collectReadableBlocks()
+    restoreFramePosition()
+    syncProgressFromFrame()
+
+    if (pendingTtsResume) {
+      pendingTtsResume = false
+      if (readableBlocks.value.length > 0) {
+        speakBlockAtIndex(activeBlockIndex())
+      } else {
+        speakFallbackText()
+      }
+    }
+  })
+}
+
+function cleanupCurrentFrame() {
+  if (currentFrameCleanup) {
+    currentFrameCleanup()
+    currentFrameCleanup = null
+  }
+  readableBlocks.value = []
+  fallbackSectionText.value = ''
+}
+
+function setupFrameInteractions() {
+  const doc = currentFrameDocument()
+  const win = currentFrameWindow()
+  if (!doc || !win || !doc.body) return
+
+  const onScroll = () => {
+    if (scrollFrame !== null) window.cancelAnimationFrame(scrollFrame)
+    scrollFrame = window.requestAnimationFrame(() => {
+      scrollFrame = null
+      syncProgressFromFrame()
+    })
+  }
+
+  const onClick = (event: MouseEvent) => {
+    const target = event.target as HTMLElement | null
+    const anchor = target?.closest<HTMLAnchorElement>('a')
+    if (anchor?.dataset.readerSectionId) {
+      event.preventDefault()
+      const sectionId = anchor.dataset.readerSectionId
+      if (!sectionId) return
+      const fragment = anchor.dataset.readerFragment || undefined
+      void loadSection(sectionId, { fragment })
+      return
+    }
+
+    if (ttsMode.value !== 'selecting') return
+    const blockElement = target?.closest<HTMLElement>(`[${TTS_BLOCK_ATTR}]`)
+    if (!blockElement) return
+    const index = Number(blockElement.getAttribute(TTS_BLOCK_ATTR))
+    if (!Number.isFinite(index)) return
+    event.preventDefault()
+    event.stopPropagation()
+    selectedStartBlockIndex.value = index
+    currentSpokenBlockIndex.value = null
+    ttsMode.value = 'idle'
+    syncBlockMarkers()
+  }
+
+  doc.addEventListener('click', onClick, true)
+  win.addEventListener('scroll', onScroll, { passive: true })
+
+  currentFrameCleanup = () => {
+    doc.removeEventListener('click', onClick, true)
+    win.removeEventListener('scroll', onScroll)
+  }
+}
+
+function restoreFramePosition() {
+  const restore = pendingRestore
+  pendingRestore = null
+  if (!restore) return
+
+  if (restore.fragment) {
+    scrollToFragment(restore.fragment)
+    return
+  }
+
+  if (restore.blockIndex !== null) {
+    scrollToBlockIndex(restore.blockIndex)
+    return
+  }
+
+  if (restore.sectionProgress > 0) {
+    const scrollElement = currentScrollElement()
+    if (!scrollElement) return
+    const maxScroll = Math.max(scrollElement.scrollHeight - scrollElement.clientHeight, 0)
+    scrollElement.scrollTop = maxScroll * restore.sectionProgress
+    return
+  }
+
+  const scrollElement = currentScrollElement()
+  if (scrollElement) scrollElement.scrollTop = 0
+}
+
+function collectReadableBlocks() {
+  const doc = currentFrameDocument()
+  if (!doc?.body) {
+    readableBlocks.value = []
+    fallbackSectionText.value = ''
+    return
+  }
+
+  const candidates = Array.from(doc.querySelectorAll<HTMLElement>(READABLE_BLOCK_SELECTOR))
+  const nextBlocks = candidates.filter((element) => {
+    if (!element.isConnected) return false
+    const text = normalizeText(element.innerText || element.textContent || '')
+    if (!text) return false
+    const nested = element.querySelector<HTMLElement>(READABLE_BLOCK_SELECTOR)
+    if (nested) {
+      const nestedText = normalizeText(nested.innerText || nested.textContent || '')
+      if (nestedText) return false
+    }
+    return true
+  })
+
+  nextBlocks.forEach((element, index) => {
+    element.setAttribute(TTS_BLOCK_ATTR, String(index))
+  })
+
+  readableBlocks.value = nextBlocks
+  fallbackSectionText.value = normalizeText(doc.body.innerText || '')
+
+  if (selectedStartBlockIndex.value !== null && selectedStartBlockIndex.value >= nextBlocks.length) {
+    selectedStartBlockIndex.value = null
+  }
+  if (currentSpokenBlockIndex.value !== null && currentSpokenBlockIndex.value >= nextBlocks.length) {
+    currentSpokenBlockIndex.value = null
+  }
+
+  syncBlockMarkers()
+}
+
+function syncProgressFromFrame() {
+  updateCurrentFragment()
+  updateCurrentPercentage()
+  collectReadableBlocks()
+  scheduleSaveProgress()
+}
+
+function updateCurrentFragment() {
+  const doc = currentFrameDocument()
+  if (!doc) {
+    currentFragment.value = ''
+    return
+  }
+
+  const tracked = Array.from(doc.querySelectorAll<HTMLElement>('[id], a[name]'))
+  let nextFragment = ''
+  for (const element of tracked) {
+    const rect = element.getBoundingClientRect()
+    if (rect.top > 100) break
+    nextFragment = element.id || element.getAttribute('name') || ''
+  }
+  currentFragment.value = nextFragment
+}
+
+function updateCurrentPercentage() {
+  if (!manifest.value || !currentSection.value) {
+    currentPercentage.value = 0
+    return
+  }
+
+  const scrollElement = currentScrollElement()
+  const maxScroll = scrollElement ? Math.max(scrollElement.scrollHeight - scrollElement.clientHeight, 0) : 0
+  const sectionProgress = scrollElement ? (maxScroll > 0 ? scrollElement.scrollTop / maxScroll : 1) : 0
+  const totalSections = Math.max(manifest.value.sections.length, 1)
+  const percentage = clamp((currentSection.value.section_index + clamp(sectionProgress, 0, 1)) / totalSections, 0, 1)
+  currentPercentage.value = Math.round(percentage * 100)
+}
+
+function scheduleSaveProgress() {
+  if (!book.value || book.value.file_type !== 'epub' || !currentSection.value || !manifest.value) return
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
-    flushProgress()
-  }, 5000)
+    void flushProgress()
+  }, 1500)
 }
 
-function flushProgress(): void {
+async function flushProgress() {
   if (saveTimer) {
     clearTimeout(saveTimer)
     saveTimer = null
   }
 
-  const id = route.params.id as string
-  const cfi = currentCfi.value
-  if (cfi) {
-    books.saveProgress(id, cfi, currentPercentage.value / 100)
-  }
-}
+  if (!book.value || book.value.file_type !== 'epub' || !currentSection.value || !manifest.value) return
 
-async function prevPage(): Promise<void> {
-  await turnPage('prev')
-}
+  const scrollElement = currentScrollElement()
+  const maxScroll = scrollElement ? Math.max(scrollElement.scrollHeight - scrollElement.clientHeight, 0) : 0
+  const sectionProgress = scrollElement ? clamp(maxScroll > 0 ? scrollElement.scrollTop / maxScroll : 1, 0, 1) : 0
+  const percentage = clamp((currentSection.value.section_index + sectionProgress) / Math.max(manifest.value.sections.length, 1), 0, 1)
 
-async function nextPage(): Promise<void> {
-  await turnPage('next')
-}
-
-function clearPendingPageTurnResume(): void {
-  logTtsDebug('clear-pending-page-turn-resume')
-  pendingPageTurnResume = false
-  pageTurnPreviousLocation = null
-}
-
-function currentLocationSignature(): string | null {
-  const location = currentLocationState
-  if (!location?.start) return currentCfi.value
-
-  const index = location.start.index ?? ''
-  const displayedPage = location.start.displayed?.page ?? ''
-  const displayedTotal = location.start.displayed?.total ?? ''
-  const cfi = location.start.cfi ?? ''
-
-  return `${index}:${displayedPage}:${displayedTotal}:${cfi}`
-}
-
-function prepareTtsPageTurnResume(): void {
-  logTtsDebug('prepare-page-turn-resume')
-  cancelSpeechOutput()
-  selectedStartBlockCfi.value = null
-  currentSpokenBlockCfi.value = null
-  ttsUsingFallback.value = false
-  pendingPageTurnResume = true
-  pageTurnPreviousLocation = currentLocationSignature()
-  syncBlockMarkers()
-}
-
-async function turnPage(direction: 'next' | 'prev'): Promise<void> {
-  const shouldResumeTts = ttsMode.value === 'speaking'
-  const atBoundary =
-    direction === 'next' ? currentLocationState?.atEnd === true : currentLocationState?.atStart === true
-
-  logTtsDebug('turn-page:start', { direction, shouldResumeTts, atBoundary })
-
-  if (shouldResumeTts && !atBoundary) {
-    prepareTtsPageTurnResume()
-  } else {
-    internalStopTts({ preserveSelected: false })
+  const payload = {
+    section_id: currentSection.value.id,
+    section_progress: sectionProgress,
+    block_index: nearestVisibleBlockIndex(),
+    percentage,
   }
 
-  try {
-    if (direction === 'next') {
-      await rendition?.next()
-    } else {
-      await rendition?.prev()
-    }
-    logTtsDebug('turn-page:await-complete', { direction })
-  } catch {
-    logTtsDebug('turn-page:error', { direction })
-    if (shouldResumeTts) internalStopTts({ preserveSelected: false })
-  }
+  await books.saveProgress(book.value.id, payload)
 }
 
-function onKeydown(event: KeyboardEvent): void {
-  const target = event.target as HTMLElement | null
-  const tagName = target?.tagName?.toLowerCase()
-  const isFormControl = ['input', 'textarea', 'select', 'button'].includes(tagName ?? '')
+function nearestVisibleBlockIndex(): number | null {
+  if (readableBlocks.value.length === 0) return null
 
-  if (isFormControl) return
-
-  if (event.key === 'ArrowLeft') {
-    event.preventDefault()
-    void prevPage()
-  } else if (event.key === 'ArrowRight') {
-    event.preventDefault()
-    void nextPage()
+  let lastAbove = 0
+  for (let index = 0; index < readableBlocks.value.length; index += 1) {
+    const element = readableBlocks.value[index]
+    const rect = element.getBoundingClientRect()
+    if (rect.bottom >= 96 && rect.top <= window.innerHeight) return index
+    if (rect.top <= 96) lastAbove = index
   }
+  return lastAbove
 }
 
-function setupTtsContents(contents: Contents): void {
-  void contents.addStylesheetCss(TTS_IFRAME_STYLES, TTS_STYLE_KEY)
+function scrollToBlockIndex(index: number) {
+  const element = readableBlocks.value[index]
+  if (!element) return
+  element.scrollIntoView({ block: 'start', behavior: 'auto' })
+}
 
-  const documentRef = contents.document
-  if (!documentRef || contentCleanups.has(documentRef)) {
-    syncBlockMarkers()
+function scrollToFragment(fragment: string) {
+  const doc = currentFrameDocument()
+  if (!doc) return
+
+  const byID = doc.getElementById(fragment)
+  if (byID) {
+    byID.scrollIntoView({ block: 'start', behavior: 'auto' })
     return
   }
 
-  const onClick = (event: Event) => {
-    if (ttsMode.value !== 'selecting') return
+  const byName = Array.from(doc.querySelectorAll<HTMLElement>('a[name]'))
+    .find((element) => element.getAttribute('name') === fragment)
+  if (byName) {
+    byName.scrollIntoView({ block: 'start', behavior: 'auto' })
+  }
+}
 
-    const target = event.target as HTMLElement | null
-    const blockElement = target?.closest<HTMLElement>(`[${TTS_BLOCK_ATTR}]`)
-    if (!blockElement) return
+function applyFrameTheme() {
+  const doc = currentFrameDocument()
+  if (!doc) return
 
-    const index = Number(blockElement.getAttribute(TTS_BLOCK_ATTR))
-    const block = visibleBlocks.value[index]
-    if (!block) return
-
-    event.preventDefault()
-    event.stopPropagation()
-
-    selectedStartBlockCfi.value = block.cfi
-    currentSpokenBlockCfi.value = null
-    ttsUsingFallback.value = false
-    ttsMode.value = 'idle'
-    syncBlockMarkers()
+  let head = doc.head
+  if (!head) {
+    head = doc.createElement('head')
+    doc.documentElement?.prepend(head)
   }
 
-  documentRef.addEventListener('click', onClick, true)
-  contentCleanups.set(documentRef, () => {
-    documentRef.removeEventListener('click', onClick, true)
-  })
+  let style = head.querySelector<HTMLStyleElement>(`#${THEME_STYLE_ID}`)
+  if (!style) {
+    style = doc.createElement('style')
+    style.id = THEME_STYLE_ID
+    head.appendChild(style)
+  }
 
+  style.textContent = frameThemeStyles(activeTheme.value)
+  if (doc.body) {
+    doc.body.classList.toggle(TTS_SELECTING_CLASS, ttsMode.value === 'selecting')
+  }
   syncBlockMarkers()
 }
 
-function teardownTtsContents(contents: Contents): void {
-  const documentRef = contents.document
-  if (!documentRef) return
+function frameThemeStyles(theme: ThemePalette): string {
+  return `
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: ${theme.pageBackground} !important;
+      color: ${theme.text} !important;
+    }
 
-  contentCleanups.get(documentRef)?.()
-  contentCleanups.delete(documentRef)
+    body {
+      max-width: min(860px, 100%);
+      margin: 0 auto;
+      padding: 0 1.2rem 2.8rem;
+      font-family: "Iowan Old Style", Georgia, serif;
+      font-size: clamp(1rem, 0.98rem + 0.2vw, 1.06rem);
+      line-height: 1.72;
+      word-break: break-word;
+    }
+
+    a {
+      color: ${theme.link} !important;
+    }
+
+    h1, h2, h3, h4, h5, h6, strong, b {
+      color: ${theme.text} !important;
+    }
+
+    img, svg, video, canvas, object, embed, iframe, audio {
+      max-width: 100% !important;
+      height: auto;
+    }
+
+    table {
+      display: block;
+      max-width: 100%;
+      overflow-x: auto;
+      border-collapse: collapse;
+    }
+
+    pre {
+      white-space: pre-wrap;
+    }
+
+    [${TTS_BLOCK_ATTR}] {
+      border-radius: 0.28rem;
+      transition: background-color 0.16s ease, box-shadow 0.16s ease;
+    }
+
+    body.${TTS_SELECTING_CLASS} [${TTS_BLOCK_ATTR}] {
+      cursor: pointer;
+    }
+
+    body.${TTS_SELECTING_CLASS} [${TTS_BLOCK_ATTR}]:hover {
+      background: ${hexToRgba(theme.highlight, 0.16)};
+      box-shadow: inset 0 0 0 1px ${hexToRgba(theme.highlight, 0.55)};
+    }
+
+    [${TTS_SELECTED_ATTR}] {
+      background: ${hexToRgba(theme.highlight, 0.14)};
+      box-shadow: inset 0 0 0 1px ${hexToRgba(theme.highlight, 0.48)};
+    }
+
+    [${TTS_ACTIVE_ATTR}] {
+      background: ${hexToRgba(theme.highlight, 0.28)};
+      box-shadow: inset 0 0 0 1px ${hexToRgba(theme.highlight, 0.74)};
+    }
+  `
 }
 
-function getRenderedContents(): Contents[] {
-  if (!rendition) return []
-  return ((rendition.getContents() as unknown) as Contents[]).filter(Boolean)
-}
-
-function scheduleVisibleBlocksRefresh(): void {
-  if (refreshBlocksFrame !== null) window.cancelAnimationFrame(refreshBlocksFrame)
-
-  refreshBlocksFrame = window.requestAnimationFrame(() => {
-    refreshBlocksFrame = null
-    refreshVisibleBlocks()
-  })
-}
-
-function clearBlockMarkers(contentsList: Contents[]): void {
-  for (const contents of contentsList) {
-    const documentRef = contents.document
-    const body = documentRef?.body
-    if (!body) continue
-
+function syncBlockMarkers() {
+  const body = currentFrameBody()
+  if (body) {
     body.classList.toggle(TTS_SELECTING_CLASS, ttsMode.value === 'selecting')
+  }
 
-    const marked = body.querySelectorAll<HTMLElement>(
-      `[${TTS_BLOCK_ATTR}], [${TTS_SELECTED_ATTR}], [${TTS_ACTIVE_ATTR}]`,
-    )
-
-    marked.forEach((element) => {
-      element.removeAttribute(TTS_BLOCK_ATTR)
+  readableBlocks.value.forEach((element, index) => {
+    if (selectedStartBlockIndex.value === index) {
+      element.setAttribute(TTS_SELECTED_ATTR, 'true')
+    } else {
       element.removeAttribute(TTS_SELECTED_ATTR)
+    }
+
+    if (currentSpokenBlockIndex.value === index && (ttsMode.value === 'speaking' || ttsMode.value === 'paused')) {
+      element.setAttribute(TTS_ACTIVE_ATTR, 'true')
+    } else {
       element.removeAttribute(TTS_ACTIVE_ATTR)
-    })
-  }
-}
-
-function hasNestedReadableDescendant(element: HTMLElement): boolean {
-  const nested = element.querySelector<HTMLElement>(READABLE_BLOCK_SELECTOR)
-  if (!nested) return false
-  return normalizeText(nested.innerText || nested.textContent || '').length > 0
-}
-
-function elementStartRect(element: HTMLElement): DOMRect {
-  const clientRects = Array.from(element.getClientRects())
-  const firstRect = clientRects.find((rect) => rect.width > 0 && rect.height > 0)
-  return firstRect ?? element.getBoundingClientRect()
-}
-
-function blockIntersectsViewport(
-  element: HTMLElement,
-  contentsWindow: Window,
-  verticalOverscanPx: number,
-  horizontalOverscanPx: number,
-): boolean {
-  const styles = contentsWindow.getComputedStyle(element)
-  if (styles.display === 'none' || styles.visibility === 'hidden' || Number(styles.opacity) === 0) {
-    return false
-  }
-
-  const rect = elementStartRect(element)
-  if (rect.width <= 0 || rect.height <= 0) return false
-
-  const frameElement = contentsWindow.frameElement as Element | null
-  const readerRect = epubContainer.value?.getBoundingClientRect()
-
-  if (frameElement && readerRect) {
-    const frameRect = frameElement.getBoundingClientRect()
-    const absoluteLeft = frameRect.left + rect.left
-    const absoluteRight = frameRect.left + rect.right
-    const absoluteTop = frameRect.top + rect.top
-    const absoluteBottom = frameRect.top + rect.bottom
-
-    const horizontalOverlap =
-      Math.min(absoluteRight, readerRect.right + horizontalOverscanPx) -
-      Math.max(absoluteLeft, readerRect.left - horizontalOverscanPx)
-    const verticalOverlap =
-      Math.min(absoluteBottom, readerRect.bottom + verticalOverscanPx) -
-      Math.max(absoluteTop, readerRect.top - verticalOverscanPx)
-
-    return horizontalOverlap > 12 && verticalOverlap > 8
-  }
-
-  const horizontalOverlap =
-    Math.min(rect.right, contentsWindow.innerWidth + horizontalOverscanPx) -
-    Math.max(rect.left, -horizontalOverscanPx)
-  const verticalOverlap =
-    Math.min(rect.bottom, contentsWindow.innerHeight + verticalOverscanPx) -
-    Math.max(rect.top, -verticalOverscanPx)
-
-  return horizontalOverlap > 12 && verticalOverlap > 8
-}
-
-function isBlockNearViewport(element: HTMLElement, contentsWindow: Window): boolean {
-  return blockIntersectsViewport(
-    element,
-    contentsWindow,
-    TTS_VIEWPORT_OVERSCAN_PX,
-    TTS_HORIZONTAL_OVERSCAN_PX,
-  )
-}
-
-function isBlockInViewport(element: HTMLElement, contentsWindow: Window): boolean {
-  return blockIntersectsViewport(element, contentsWindow, 0, 0)
-}
-
-function blockCfiFromElement(contents: Contents, element: HTMLElement): string | null {
-  try {
-    return contents.cfiFromNode(element)
-  } catch {
-    try {
-      const range = element.ownerDocument.createRange()
-      range.selectNodeContents(element)
-      return contents.cfiFromRange(range)
-    } catch {
-      return null
-    }
-  }
-}
-
-function buildFallbackPageText(): string {
-  if (!rendition || !currentLocationState?.start?.cfi || !currentLocationState?.end?.cfi) {
-    return normalizeText(
-      getRenderedContents()
-        .map((contents) => contents.document?.body?.innerText ?? '')
-        .join(' '),
-    )
-  }
-
-  try {
-    const startRange = rendition.getRange(currentLocationState.start.cfi)
-    const endRange = rendition.getRange(currentLocationState.end.cfi)
-    const ownerDocument = startRange?.startContainer.ownerDocument ?? null
-
-    if (startRange && endRange && ownerDocument && ownerDocument === endRange.endContainer.ownerDocument) {
-      const range = ownerDocument.createRange()
-      range.setStart(startRange.startContainer, startRange.startOffset)
-      range.setEnd(endRange.endContainer, endRange.endOffset)
-
-      const text = normalizeText(range.toString())
-      if (text) return text
-    }
-  } catch {
-    // Fall back to visible document text below.
-  }
-
-  return normalizeText(
-    getRenderedContents()
-      .map((contents) => contents.document?.body?.innerText ?? '')
-      .join(' '),
-  )
-}
-
-function isBlockInCurrentLocation(cfi: string): boolean {
-  const startCfi = currentLocationState?.start?.cfi
-  const endCfi = currentLocationState?.end?.cfi
-  if (!rendition || !startCfi || !endCfi) return true
-
-  try {
-    return rendition.epubcfi.compare(cfi, startCfi) >= 0 && rendition.epubcfi.compare(cfi, endCfi) <= 0
-  } catch {
-    return true
-  }
-}
-
-function refreshVisibleBlocks(): void {
-  const contentsList = getRenderedContents().sort((left, right) => left.sectionIndex - right.sectionIndex)
-  clearBlockMarkers(contentsList)
-
-  const nextBlocks: ReadableBlock[] = []
-
-  for (const contents of contentsList) {
-    const documentRef = contents.document
-    const contentsWindow = contents.window
-    if (!documentRef?.body || !contentsWindow) continue
-
-    const candidates = Array.from(documentRef.querySelectorAll<HTMLElement>(READABLE_BLOCK_SELECTOR))
-
-    for (const element of candidates) {
-      const text = normalizeText(element.innerText || element.textContent || '')
-      if (!text) continue
-      if (hasNestedReadableDescendant(element)) continue
-      if (!isBlockNearViewport(element, contentsWindow)) continue
-
-      const cfi = blockCfiFromElement(contents, element)
-      if (!cfi) continue
-      if (!isBlockInCurrentLocation(cfi)) continue
-
-      nextBlocks.push({
-        cfi,
-        text,
-        sectionIndex: contents.sectionIndex,
-        element,
-        contents,
-        inViewport: isBlockInViewport(element, contentsWindow),
-      })
-    }
-  }
-
-  visibleBlocks.value = nextBlocks
-  fallbackPageText.value = nextBlocks.length > 0 ? '' : buildFallbackPageText()
-  logTtsDebug('refresh-visible-blocks', {
-    contentsCount: contentsList.length,
-    nextBlocks: nextBlocks.length,
-    firstBlockCfi: nextBlocks[0]?.cfi ?? null,
-    lastBlockCfi: nextBlocks.length > 0 ? nextBlocks[nextBlocks.length - 1].cfi : null,
-  })
-
-  if (selectedStartBlockCfi.value && !nextBlocks.some((block) => block.cfi === selectedStartBlockCfi.value)) {
-    selectedStartBlockCfi.value = null
-  }
-
-  if (ttsMode.value === 'selecting' && nextBlocks.length === 0) {
-    ttsMode.value = 'idle'
-  }
-
-  if (
-    currentSpokenBlockCfi.value &&
-    !ttsUsingFallback.value &&
-    !nextBlocks.some((block) => block.cfi === currentSpokenBlockCfi.value)
-  ) {
-    logTtsDebug('current-block-no-longer-visible', {
-      currentSpokenBlockCfi: currentSpokenBlockCfi.value,
-    })
-    if (pendingPageTurnResume) {
-      currentSpokenBlockCfi.value = null
-    } else {
-      internalStopTts({ preserveSelected: true })
-    }
-  }
-
-  syncBlockMarkers()
-
-  if (
-    pendingPageTurnResume &&
-    currentLocationSignature() !== pageTurnPreviousLocation &&
-    hasReadableText.value
-  ) {
-    logTtsDebug('resume-after-page-turn')
-    clearPendingPageTurnResume()
-    if (visibleBlocks.value.length > 0) {
-      speakBlockAtIndex(activeBlockIndex())
-    } else {
-      speakFallbackPageText()
-    }
-  }
-}
-
-function syncBlockMarkers(): void {
-  const contentsList = getRenderedContents()
-
-  for (const contents of contentsList) {
-    contents.document?.body?.classList.toggle(TTS_SELECTING_CLASS, ttsMode.value === 'selecting')
-  }
-
-  visibleBlocks.value.forEach((block, index) => {
-    block.element.setAttribute(TTS_BLOCK_ATTR, String(index))
-
-    if (block.cfi === selectedStartBlockCfi.value) {
-      block.element.setAttribute(TTS_SELECTED_ATTR, 'true')
-    } else {
-      block.element.removeAttribute(TTS_SELECTED_ATTR)
-    }
-
-    const isActiveBlock =
-      !ttsUsingFallback.value &&
-      (ttsMode.value === 'speaking' || ttsMode.value === 'paused') &&
-      block.cfi === currentSpokenBlockCfi.value
-
-    if (isActiveBlock) {
-      block.element.setAttribute(TTS_ACTIVE_ATTR, 'true')
-    } else {
-      block.element.removeAttribute(TTS_ACTIVE_ATTR)
     }
   })
 }
 
-function clearAutoAdvanceTimer(): void {
-  if (autoAdvanceTimer) {
-    clearTimeout(autoAdvanceTimer)
-    autoAdvanceTimer = null
-  }
-}
-
-function cancelSpeechOutput(): void {
-  logTtsDebug('cancel-speech-output')
-  speechToken += 1
-  clearAutoAdvanceTimer()
-  if (ttsSupported.value) window.speechSynthesis.cancel()
+function activeBlockIndex(): number {
+  if (currentSpokenBlockIndex.value !== null) return currentSpokenBlockIndex.value
+  if (selectedStartBlockIndex.value !== null) return selectedStartBlockIndex.value
+  return nearestVisibleBlockIndex() ?? 0
 }
 
 function resolveVoice(): SpeechSynthesisVoice | null {
@@ -1151,57 +1222,44 @@ function applyUtteranceSettings(utterance: SpeechSynthesisUtterance): void {
   utterance.rate = ttsPrefs.rate
   utterance.pitch = ttsPrefs.pitch
   utterance.volume = ttsPrefs.volume
-
   const voice = resolveVoice()
   utterance.lang = voice?.lang || preferredLanguage.value || 'en'
   if (voice) utterance.voice = voice
 }
 
-function activeBlockIndex(): number {
-  if (currentSpokenBlockIndex.value >= 0) return currentSpokenBlockIndex.value
-  if (selectedStartBlockIndex.value >= 0) return selectedStartBlockIndex.value
-  const firstViewportIndex = visibleBlocks.value.findIndex((block) => block.inViewport)
-  if (firstViewportIndex >= 0) return firstViewportIndex
-  return 0
+function cancelSpeechOutput() {
+  speechToken += 1
+  if (autoAdvanceTimer) {
+    clearTimeout(autoAdvanceTimer)
+    autoAdvanceTimer = null
+  }
+  if (ttsSupported.value) window.speechSynthesis.cancel()
 }
 
-function internalStopTts(options: StopTtsOptions = {}): void {
-  logTtsDebug('internal-stop-tts', { preserveSelected: options.preserveSelected ?? false })
+function internalStopTts(options: { preserveSelected: boolean }) {
   cancelSpeechOutput()
-  clearPendingPageTurnResume()
   ttsMode.value = 'idle'
-  ttsUsingFallback.value = false
-  currentSpokenBlockCfi.value = null
-  if (!options.preserveSelected) selectedStartBlockCfi.value = null
+  ttsError.value = null
+  currentSpokenBlockIndex.value = null
+  pendingTtsResume = false
+  if (!options.preserveSelected) selectedStartBlockIndex.value = null
   syncBlockMarkers()
 }
 
-function stopTts(): void {
-  logTtsDebug('stop-tts')
+function stopTts() {
   internalStopTts({ preserveSelected: true })
 }
 
-function handleTtsError(error: string): void {
-  logTtsDebug('tts-error', { error })
-  if (pendingPageTurnResume && (error === 'interrupted' || error === 'canceled')) {
-    return
-  }
-
-  internalStopTts({ preserveSelected: true })
-  if (error !== 'interrupted' && error !== 'canceled') {
-    ttsError.value = `TTS error: ${error}`
-  }
+function readableBlockText(index: number): string {
+  const element = readableBlocks.value[index]
+  return element ? normalizeText(element.innerText || element.textContent || '') : ''
 }
 
-function speakFallbackPageText(): void {
-  const text = fallbackPageText.value
+function speakFallbackText() {
+  const text = fallbackSectionText.value
   if (!ttsSupported.value || !text) return
 
   const token = speechToken + 1
-  logTtsDebug('speak-fallback:start', {
-    token,
-    textLength: text.length,
-  })
   cancelSpeechOutput()
   speechToken = token
 
@@ -1209,16 +1267,12 @@ function speakFallbackPageText(): void {
   applyUtteranceSettings(utterance)
 
   ttsMode.value = 'speaking'
-  ttsUsingFallback.value = true
-  currentSpokenBlockCfi.value = null
+  currentSpokenBlockIndex.value = null
   ttsError.value = null
   syncBlockMarkers()
 
   utterance.onend = () => {
     if (token !== speechToken) return
-
-    logTtsDebug('speak-fallback:end', { token })
-    ttsUsingFallback.value = false
     if (ttsPrefs.autoAdvance) {
       void queueAutoAdvance()
     } else {
@@ -1226,60 +1280,42 @@ function speakFallbackPageText(): void {
       syncBlockMarkers()
     }
   }
-
   utterance.onerror = (event) => {
     if (token !== speechToken) return
-    logTtsDebug('speak-fallback:error', { token, error: event.error })
     handleTtsError(event.error)
   }
 
   window.speechSynthesis.speak(utterance)
 }
 
-function speakBlockAtIndex(index: number): void {
-  const block = visibleBlocks.value[index]
-  if (!block) {
-    logTtsDebug('speak-block:missing', { index })
+function speakBlockAtIndex(index: number) {
+  const text = readableBlockText(index)
+  if (!text || !ttsSupported.value) {
     internalStopTts({ preserveSelected: true })
     return
   }
 
   const token = speechToken + 1
-  logTtsDebug('speak-block:start', {
-    index,
-    token,
-    blockCfi: block.cfi,
-    textLength: block.text.length,
-    preview: block.text.slice(0, 80),
-  })
   cancelSpeechOutput()
   speechToken = token
 
-  const utterance = new SpeechSynthesisUtterance(block.text)
+  const utterance = new SpeechSynthesisUtterance(text)
   applyUtteranceSettings(utterance)
 
+  currentSpokenBlockIndex.value = index
   ttsMode.value = 'speaking'
-  ttsUsingFallback.value = false
-  currentSpokenBlockCfi.value = block.cfi
   ttsError.value = null
+  scrollToBlockIndex(index)
   syncBlockMarkers()
 
   utterance.onend = () => {
     if (token !== speechToken) return
-
     const nextIndex = index + 1
-    logTtsDebug('speak-block:end', {
-      index,
-      token,
-      nextIndex,
-      visibleBlockCount: visibleBlocks.value.length,
-    })
-    if (nextIndex < visibleBlocks.value.length) {
+    if (nextIndex < readableBlocks.value.length) {
       speakBlockAtIndex(nextIndex)
       return
     }
-
-    currentSpokenBlockCfi.value = null
+    currentSpokenBlockIndex.value = null
     if (ttsPrefs.autoAdvance) {
       void queueAutoAdvance()
     } else {
@@ -1287,93 +1323,72 @@ function speakBlockAtIndex(index: number): void {
       syncBlockMarkers()
     }
   }
-
   utterance.onerror = (event) => {
     if (token !== speechToken) return
-    logTtsDebug('speak-block:error', { index, token, error: event.error, blockCfi: block.cfi })
     handleTtsError(event.error)
   }
 
   window.speechSynthesis.speak(utterance)
 }
 
-async function queueAutoAdvance(): Promise<void> {
-  logTtsDebug('queue-auto-advance:start', {
-    atEnd: currentLocationState?.atEnd ?? false,
-  })
-  if (!rendition || currentLocationState?.atEnd) {
+function handleTtsError(error: string) {
+  internalStopTts({ preserveSelected: true })
+  if (error !== 'interrupted' && error !== 'canceled') {
+    ttsError.value = `TTS error: ${error}`
+  }
+}
+
+async function queueAutoAdvance() {
+  if (!currentSection.value?.next_section_id) {
     internalStopTts({ preserveSelected: true })
     return
   }
 
-  prepareTtsPageTurnResume()
-
-  autoAdvanceTimer = setTimeout(async () => {
+  autoAdvanceTimer = setTimeout(() => {
     autoAdvanceTimer = null
-
-    try {
-      logTtsDebug('queue-auto-advance:fire')
-      await rendition?.next()
-    } catch {
-      logTtsDebug('queue-auto-advance:error')
-      internalStopTts({ preserveSelected: false })
-    }
-  }, 250)
+    void loadSection(currentSection.value?.next_section_id ?? '', { resumeTts: true, blockIndex: 0 })
+  }, 180)
 }
 
-async function startTts(): Promise<void> {
-  logTtsDebug('start-tts')
+async function startTts() {
   if (!ttsSupported.value || !hasReadableText.value || ttsMode.value === 'selecting') return
-
-  ttsError.value = null
-
-  if (visibleBlocks.value.length > 0) {
+  if (readableBlocks.value.length > 0) {
     speakBlockAtIndex(activeBlockIndex())
     return
   }
-
-  speakFallbackPageText()
+  speakFallbackText()
 }
 
-function pauseTts(): void {
+function pauseTts() {
   if (ttsMode.value !== 'speaking') return
-
-  logTtsDebug('pause-tts')
   cancelSpeechOutput()
-  clearPendingPageTurnResume()
   ttsMode.value = 'paused'
   syncBlockMarkers()
 }
 
-async function resumeTts(): Promise<void> {
-  logTtsDebug('resume-tts')
+async function resumeTts() {
   if (ttsMode.value !== 'paused') return
-
-  if (ttsUsingFallback.value || visibleBlocks.value.length === 0) {
-    speakFallbackPageText()
+  if (readableBlocks.value.length > 0) {
+    speakBlockAtIndex(activeBlockIndex())
     return
   }
-
-  speakBlockAtIndex(activeBlockIndex())
+  speakFallbackText()
 }
 
-async function toggleTts(): Promise<void> {
+async function toggleTts() {
   if (ttsMode.value === 'speaking') {
     pauseTts()
     return
   }
-
   if (ttsMode.value === 'paused') {
     await resumeTts()
     return
   }
-
   await startTts()
 }
 
-function toggleParagraphPicker(): void {
+function toggleParagraphPicker() {
   if (!canChooseParagraph.value) return
-
   if (ttsMode.value === 'selecting') {
     ttsMode.value = 'idle'
     syncBlockMarkers()
@@ -1382,130 +1397,96 @@ function toggleParagraphPicker(): void {
 
   internalStopTts({ preserveSelected: true })
   ttsMode.value = 'selecting'
-  ttsError.value = null
   syncBlockMarkers()
 }
 
-function clearStartBlock(): void {
-  selectedStartBlockCfi.value = null
-  syncBlockMarkers()
-}
-
-function restartCurrentPlayback(): void {
+function restartCurrentPlayback() {
   if (ttsMode.value !== 'speaking') return
-
-  logTtsDebug('restart-current-playback')
-  if (ttsUsingFallback.value || visibleBlocks.value.length === 0) {
-    speakFallbackPageText()
-    return
+  if (readableBlocks.value.length > 0) {
+    speakBlockAtIndex(activeBlockIndex())
+  } else {
+    speakFallbackText()
   }
-
-  speakBlockAtIndex(activeBlockIndex())
 }
 
-function onVoiceChange(): void {
+function onVoiceChange() {
   persistTtsPreferences()
   restartCurrentPlayback()
 }
 
-function onSpeechSettingChange(): void {
+function onSpeechSettingChange() {
   persistTtsPreferences()
   restartCurrentPlayback()
 }
 
-function onAutoAdvanceChange(): void {
+function onAutoAdvanceChange() {
   persistTtsPreferences()
 }
 
-function onReaderThemeChange(): void {
-  persistReaderPreferences()
-  applyReaderTheme()
-}
-
-function loadVoices(): void {
+function loadVoices() {
   if (!ttsSupported.value) return
   availableVoices.value = window.speechSynthesis.getVoices()
 }
 
+function hexToRgba(hex: string, alpha: number): string {
+  const normalized = hex.replace('#', '')
+  const expanded = normalized.length === 3
+    ? normalized.split('').map((part) => part + part).join('')
+    : normalized
+  const value = Number.parseInt(expanded, 16)
+  if (!Number.isFinite(value)) return `rgba(0, 0, 0, ${alpha})`
+  const r = (value >> 16) & 255
+  const g = (value >> 8) & 255
+  const b = value & 255
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function mixColor(base: string, overlay: string, overlayAlpha: number): string {
+  const baseRgb = parseHex(base)
+  const overlayRgb = parseHex(overlay)
+  return `rgb(${Math.round(baseRgb.r * (1 - overlayAlpha) + overlayRgb.r * overlayAlpha)}, ${Math.round(baseRgb.g * (1 - overlayAlpha) + overlayRgb.g * overlayAlpha)}, ${Math.round(baseRgb.b * (1 - overlayAlpha) + overlayRgb.b * overlayAlpha)})`
+}
+
+function parseHex(hex: string): { r: number; g: number; b: number } {
+  const normalized = hex.replace('#', '')
+  const expanded = normalized.length === 3
+    ? normalized.split('').map((part) => part + part).join('')
+    : normalized
+  const value = Number.parseInt(expanded, 16)
+  if (!Number.isFinite(value)) {
+    return { r: 0, g: 0, b: 0 }
+  }
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255,
+  }
+}
+
+watch(activeTheme, () => {
+  applyFrameTheme()
+})
+
 onMounted(async () => {
   ttsSupported.value = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window
-  window.addEventListener('keydown', onKeydown)
-  window.addEventListener('resize', scheduleVisibleBlocksRefresh)
-
   if (ttsSupported.value) {
     loadVoices()
     window.speechSynthesis.addEventListener('voiceschanged', loadVoices)
   }
-
-  const id = route.params.id as string
-
-  try {
-    await Promise.all([books.fetchBook(id), books.fetchProgress(id)])
-  } catch {
-    epubError.value = 'Failed to load book metadata.'
-    loading.value = false
-    return
-  }
-
-  if (book.value?.file_type === 'pdf') {
-    loading.value = false
-    try {
-      const blob = await getContentBlob(id)
-      pdfBlobUrl.value = URL.createObjectURL(blob)
-    } catch {
-      // Non-fatal — the toolbar still shows a download button
-    }
-    return
-  }
-
-  if (book.value?.file_type !== 'epub') {
-    loading.value = false
-    return
-  }
-
-  let arrayBuffer: ArrayBuffer
-  try {
-    const response = await client.get<ArrayBuffer>(`/books/${id}/content`, {
-      responseType: 'arraybuffer',
-    })
-    arrayBuffer = response.data
-  } catch {
-    epubError.value = 'Failed to fetch EPUB file.'
-    loading.value = false
-    return
-  }
-
-  try {
-    await initEpub(arrayBuffer)
-  } catch (error) {
-    epubError.value = `Failed to open EPUB: ${error instanceof Error ? error.message : String(error)}`
-    loading.value = false
-  }
+  await loadReaderState(route.params.id as string)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
-  window.removeEventListener('resize', scheduleVisibleBlocksRefresh)
-
+  cleanupCurrentFrame()
   if (ttsSupported.value) {
     window.speechSynthesis.removeEventListener('voiceschanged', loadVoices)
     cancelSpeechOutput()
   }
-
-  if (refreshBlocksFrame !== null) {
-    window.cancelAnimationFrame(refreshBlocksFrame)
-    refreshBlocksFrame = null
+  if (scrollFrame !== null) {
+    window.cancelAnimationFrame(scrollFrame)
+    scrollFrame = null
   }
-
-  contentCleanups.forEach((cleanup) => cleanup())
-  contentCleanups.clear()
-
-  flushProgress()
-  rendition?.destroy()
-  epubBook?.destroy()
-  rendition = null
-  epubBook = null
-
+  void flushProgress()
   if (pdfBlobUrl.value) {
     URL.revokeObjectURL(pdfBlobUrl.value)
     pdfBlobUrl.value = null
@@ -1517,248 +1498,422 @@ onUnmounted(() => {
 .reader-page {
   height: 100vh;
   height: 100dvh;
-  min-height: 100vh;
-  min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  background: var(--bg);
+  background: var(--reader-bg);
+  color: var(--reader-text);
 }
 
 .reader-body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   min-height: 0;
 }
 
 .reader-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.85rem 1rem;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--reader-border);
+  background: color-mix(in srgb, var(--reader-surface) 94%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.reader-heading {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.6rem 1.25rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  flex-shrink: 0;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .back-btn {
   flex-shrink: 0;
-  white-space: nowrap;
+  border-radius: 999px;
+  padding: 0.5rem 0.9rem;
+  background: color-mix(in srgb, var(--reader-surface) 82%, transparent);
+  border-color: color-mix(in srgb, var(--reader-muted) 20%, transparent);
 }
 
 .book-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
   min-width: 0;
+  display: grid;
+  gap: 0.18rem;
 }
 
 .book-title {
-  font-weight: 600;
-  font-size: 0.95rem;
+  font-weight: 700;
+  font-size: 1.02rem;
+  line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.book-author {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  line-height: 1.35;
-}
-
-.tts-toolbar {
+.book-meta {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  min-width: min(100%, 34rem);
+  gap: 0.45rem;
+  min-width: 0;
+  color: var(--reader-muted);
+  font-size: 0.82rem;
 }
 
-.tts-status {
-  display: inline-flex;
-  align-items: center;
-  min-height: 2rem;
-  max-width: 100%;
-  padding: 0 0.7rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-muted);
-  font-size: 0.8rem;
-  font-weight: 600;
+.book-meta-divider {
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--reader-muted) 80%, transparent);
+}
+
+.book-author,
+.book-section {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tts-status-compact {
-  display: none;
-}
-
-.tts-status.is-speaking {
-  color: var(--accent);
-  border-color: rgba(200, 169, 110, 0.4);
-  background: rgba(200, 169, 110, 0.08);
-}
-
-.tts-status.is-paused,
-.tts-status.is-selecting {
-  color: var(--text);
-}
-
-.tts-status.is-disabled {
-  opacity: 0.7;
-}
-
-.tts-btn {
-  min-width: 6.25rem;
-}
-
-.tts-control {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.45rem;
-}
-
-.tts-control-icon {
-  font-size: 0.98rem;
-  line-height: 1;
-}
-
-.tts-control.is-active {
-  border-color: rgba(200, 169, 110, 0.45);
-  color: var(--accent);
-  background: rgba(200, 169, 110, 0.08);
-}
-
-.tts-start-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.2rem 0.25rem 0.2rem 0.7rem;
-  border-radius: 999px;
-  border: 1px solid rgba(200, 169, 110, 0.3);
-  background: rgba(200, 169, 110, 0.08);
-  color: var(--text);
-  font-size: 0.8rem;
-}
-
-.btn-inline {
-  padding: 0.3rem 0.6rem;
-  font-size: 0.78rem;
-}
-
-.tts-settings-panel {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.85rem 1rem;
-  padding: 0.9rem 1.25rem 1rem;
-  border-bottom: 1px solid var(--border);
-  background: rgba(26, 26, 36, 0.95);
-}
-
-.tts-field {
+.reader-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
   min-width: 0;
 }
 
-.tts-field-label {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.tts-select {
-  width: 100%;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 0.92rem;
-  padding: 0.6rem 0.8rem;
-  outline: none;
-}
-
-.tts-select:focus {
-  border-color: var(--accent);
-}
-
-.tts-slider-wrap {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.tts-slider-value {
-  width: 3.5rem;
-  color: var(--text);
-  font-size: 0.84rem;
-  text-align: right;
-}
-
-.tts-slider {
-  flex: 1;
-  accent-color: var(--accent);
-}
-
-.tts-checkbox {
+.toolbar-btn,
+.settings-close,
+.nav-btn {
+  border-radius: 999px;
+  padding: 0.5rem 0.85rem;
+  background: color-mix(in srgb, var(--reader-surface) 82%, transparent);
+  border-color: color-mix(in srgb, var(--reader-muted) 20%, transparent);
   display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
-  color: var(--text);
-  font-size: 0.88rem;
-  align-self: end;
-}
-
-.tts-checkbox input[type='checkbox'] {
-  width: auto;
-  accent-color: var(--accent);
-}
-
-.tts-feedback {
-  padding: 0.75rem 1.25rem 0;
-  color: var(--danger);
-  font-size: 0.85rem;
-  line-height: 1.35;
-}
-
-.download-error {
-  color: var(--danger);
-  font-size: 0.85rem;
-  line-height: 1.35;
-}
-
-.state-overlay {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   justify-content: center;
+  gap: 0.35rem;
+  line-height: 1.15;
+}
+
+.label-mobile {
+  display: none;
+}
+
+.progress-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.38rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--reader-muted) 20%, transparent);
+  background: color-mix(in srgb, var(--reader-surface) 78%, transparent);
+  color: var(--reader-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.progress-chip-value {
+  color: var(--reader-text);
+  font-weight: 700;
+}
+
+.progress-chip-detail {
+  color: inherit;
+}
+
+.toolbar-btn.is-active {
+  border-color: color-mix(in srgb, var(--reader-accent) 50%, transparent);
+  background: var(--reader-nav-active-bg);
+}
+
+.reader-settings-shell {
+  position: relative;
+}
+
+.reader-settings-backdrop {
+  display: none;
+}
+
+.reader-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1rem;
-  color: var(--text-muted);
+  padding: 0.85rem 1rem 1rem;
+  border-bottom: 1px solid var(--reader-border);
+  background: color-mix(in srgb, var(--reader-surface) 97%, transparent);
+}
+
+.reader-settings-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.settings-kicker {
+  display: inline-block;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--reader-muted);
+}
+
+.reader-settings-header h2 {
+  margin: 0.2rem 0 0;
+  font-size: 1rem;
+}
+
+.reader-mobile-actions {
+  display: none;
+}
+
+.settings-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.settings-group {
+  background: color-mix(in srgb, var(--reader-surface) 96%, transparent);
+  border: 1px solid var(--reader-border);
+  border-radius: 1rem;
+  padding: 1rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.settings-group h3 {
+  margin: 0;
   font-size: 0.95rem;
 }
 
-.state-overlay.error {
-  color: var(--danger);
+.theme-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.theme-chip {
+  border: 1px solid var(--reader-border);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 0.42rem 0.78rem;
+  cursor: pointer;
+}
+
+.theme-chip.is-active {
+  background: var(--reader-nav-active-bg);
+  border-color: color-mix(in srgb, var(--reader-accent) 50%, transparent);
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.theme-field,
+.tts-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.theme-field input[type='color'] {
+  width: 100%;
+  height: 2.6rem;
+  border: 0;
+  background: transparent;
+}
+
+.tts-select,
+.tts-slider {
+  width: 100%;
+}
+
+.tts-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.tts-feedback {
+  margin: 0;
+  padding: 0.75rem 1.2rem;
+  color: #ffb3b3;
+  background: rgba(120, 24, 24, 0.2);
+  border-bottom: 1px solid rgba(120, 24, 24, 0.35);
+}
+
+.reader-shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  position: relative;
+}
+
+.reader-sidebar {
+  border-right: 1px solid var(--reader-border);
+  background: color-mix(in srgb, var(--reader-surface) 94%, transparent);
+  padding: 1rem;
+  overflow-y: auto;
+  min-height: 0;
+  position: relative;
+  z-index: 2;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.sidebar-header h2 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.sidebar-close {
+  display: none;
+}
+
+.sidebar-empty {
+  margin: 0;
+  color: var(--reader-muted);
+}
+
+.reader-main {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.reader-frame-wrap {
+  position: relative;
+  min-height: 0;
+  background: var(--reader-surface);
+}
+
+.reader-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--reader-surface);
+}
+
+.frame-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.14);
+  z-index: 1;
+}
+
+.reader-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--reader-border);
+  background: color-mix(in srgb, var(--reader-surface) 96%, transparent);
+}
+
+.nav-btn {
+  flex-shrink: 0;
+}
+
+.progress-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.progress-track {
+  flex: 1;
+  height: 0.32rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--reader-accent), var(--reader-link));
+}
+
+.progress-label {
+  color: var(--reader-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.reader-scrim {
+  display: none;
+}
+
+.state-overlay,
+.pdf-viewer {
+  flex: 1;
+  min-height: 0;
+}
+
+.state-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .spinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-top-color: var(--reader-accent);
+  animation: spin 0.9s linear infinite;
+}
+
+.pdf-viewer {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.pdf-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.pdf-toolbar {
+  padding: 0.8rem 1.2rem;
+  border-top: 1px solid var(--reader-border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+}
+
+.download-error {
+  color: #ffb3b3;
+}
+
+.fallback-card {
+  max-width: 420px;
+  padding: 1.5rem;
+  text-align: center;
+  display: grid;
+  gap: 0.8rem;
 }
 
 @keyframes spin {
@@ -1767,231 +1922,208 @@ onUnmounted(() => {
   }
 }
 
-.fallback-card {
-  max-width: 420px;
-  padding: 2rem;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1.25rem;
-  text-align: center;
-}
-
-.epub-container {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.pdf-viewer {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.pdf-iframe {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  border: none;
-}
-
-.pdf-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  padding: 0.5rem 1rem calc(0.5rem + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.reader-footer {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.5rem 1.25rem calc(0.5rem + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-  flex-shrink: 0;
-}
-
-.nav-btn {
-  flex-shrink: 0;
-  min-width: 6rem;
-}
-
-.progress-wrap {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  min-width: 0;
-}
-
-.progress-track {
-  flex: 1;
-  height: 4px;
-  background: var(--border);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 2px;
-  transition: width 0.4s ease;
-}
-
-.progress-label {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  min-width: 2.75rem;
-  text-align: right;
-}
-
-@media (max-width: 900px) {
+@media (max-width: 980px) {
   .reader-header {
-    padding-inline: 1rem;
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .tts-toolbar {
-    width: 100%;
+  .reader-toolbar {
     justify-content: flex-start;
   }
 
-  .tts-settings-panel {
-    padding-inline: 1rem;
+  .reader-shell {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .tts-feedback {
-    padding-inline: 1rem;
+  .reader-sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(84vw, 320px);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
   }
 
-  .reader-footer {
-    padding-inline: 1rem;
+  .reader-sidebar.is-open {
+    transform: translateX(0);
+  }
+
+  .reader-scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 1;
+  }
+
+  .reader-scrim.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .sidebar-close {
+    display: inline-flex;
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 720px) {
   .reader-header {
-    padding: 0.7rem 0.85rem;
+    padding: 0.6rem 0.85rem;
+    gap: 0.7rem;
   }
 
-  .reader-header.is-epub-reader {
-    padding: 0.55rem 0.75rem;
+  .reader-heading {
+    gap: 0.65rem;
   }
 
-  .reader-header.is-epub-reader .back-btn,
-  .reader-header.is-epub-reader .book-info {
+  .back-btn {
+    padding: 0.46rem 0.78rem;
+    font-size: 0.82rem;
+  }
+
+  .book-title {
+    font-size: 0.96rem;
+  }
+
+  .book-meta {
     display: none;
   }
 
-  .reader-header.is-epub-reader .tts-toolbar {
+  .reader-toolbar {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: stretch;
     width: 100%;
-    min-width: 0;
-    justify-content: flex-start;
     gap: 0.45rem;
   }
 
-  .reader-header.is-epub-reader .tts-status {
-    min-height: 0;
-    padding: 0.35rem 0.65rem;
-    font-size: 0.72rem;
+  .toolbar-btn {
+    min-width: 0;
+    padding: 0.5rem 0.55rem;
+    font-size: 0.8rem;
   }
 
-  .reader-header.is-epub-reader .tts-status-full {
+  .toolbar-btn-secondary {
     display: none;
   }
 
-  .reader-header.is-epub-reader .tts-status-compact {
+  .label-desktop {
+    display: none;
+  }
+
+  .label-mobile {
     display: inline;
   }
 
-  .reader-header.is-epub-reader .tts-control {
-    width: 2.7rem;
-    min-width: 2.7rem;
-    height: 2.7rem;
-    padding: 0;
-    border-radius: 0.85rem;
+  .progress-chip {
+    justify-content: center;
+    min-width: 0;
+    padding: 0.36rem 0.55rem;
   }
 
-  .reader-header.is-epub-reader .tts-control-label {
-    display: none;
+  .reader-settings-shell {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    z-index: 40;
   }
 
-  .reader-header.is-epub-reader .tts-control-icon {
-    font-size: 1.02rem;
+  .reader-settings-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: rgba(8, 10, 14, 0.45);
   }
 
-  .reader-header.is-epub-reader .tts-start-chip {
+  .reader-settings {
+    position: relative;
+    z-index: 1;
     width: 100%;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    padding: 0.4rem 0.5rem 0.4rem 0.7rem;
-  }
-
-  .tts-settings-panel {
-    grid-template-columns: 1fr;
-    gap: 0.75rem;
+    max-height: min(78vh, 680px);
+    overflow-y: auto;
     padding: 0.85rem 0.9rem 1rem;
+    grid-template-columns: 1fr;
+    border: 1px solid var(--reader-border);
+    border-bottom: 0;
+    border-radius: 1.2rem 1.2rem 0 0;
+    box-shadow: 0 -24px 48px rgba(0, 0, 0, 0.28);
   }
 
-  .tts-slider-wrap {
-    gap: 0.6rem;
+  .reader-mobile-actions {
+    display: grid;
   }
 
-  .tts-slider-value {
-    width: 3rem;
-  }
-
-  .tts-checkbox {
-    align-self: start;
-  }
-
-  .tts-feedback {
-    padding: 0.75rem 0.9rem 0;
-  }
-
-  .pdf-toolbar {
-    flex-wrap: wrap;
-    justify-content: stretch;
-    padding: 0.65rem 0.9rem calc(0.65rem + env(safe-area-inset-bottom));
-  }
-
-  .pdf-toolbar > .btn-ghost,
-  .pdf-toolbar > .download-error {
-    width: 100%;
+  .theme-grid {
+    grid-template-columns: 1fr;
   }
 
   .reader-footer {
-    display: none;
+    padding: 0.72rem 0.85rem;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+  }
+
+  .nav-btn {
+    padding: 0.5rem 0.85rem;
+    font-size: 0.82rem;
+  }
+
+  .progress-wrap {
+    min-width: 0;
+    order: 3;
+    width: 100%;
+    gap: 0.65rem;
   }
 }
 
 @media (max-width: 480px) {
   .reader-header {
-    padding: 0.6rem 0.75rem;
+    padding: 0.58rem 0.72rem;
   }
 
-  .reader-header.is-epub-reader {
-    padding: 0.5rem 0.65rem;
+  .reader-heading {
+    gap: 0.55rem;
   }
 
-  .tts-start-chip {
+  .back-btn {
+    padding: 0.44rem 0.68rem;
+  }
+
+  .book-title {
+    font-size: 0.93rem;
+  }
+
+  .toolbar-btn {
+    padding: 0.46rem 0.4rem;
     font-size: 0.76rem;
   }
 
-  .btn-inline {
-    padding: 0.28rem 0.55rem;
+  .progress-chip {
+    padding: 0.34rem 0.42rem;
+    font-size: 0.76rem;
   }
 
-  .reader-header.is-epub-reader .tts-control {
-    width: 2.55rem;
-    min-width: 2.55rem;
-    height: 2.55rem;
+  .progress-chip-detail {
+    display: none;
+  }
+
+  .reader-settings {
+    padding: 0.8rem 0.75rem 0.95rem;
+  }
+
+  .reader-footer {
+    padding: 0.65rem 0.72rem;
+  }
+
+  .progress-label {
+    font-size: 0.76rem;
   }
 }
 </style>

@@ -66,6 +66,7 @@ server {
 
 Alexandria stores both SQLite data and uploaded files under `/data`.
 
+- The default [docker-compose.yml](/home/alexander/Projects/alexandria/docker-compose.yml) uses a Docker volume named `alexandria-data` for `/data`.
 - Back up the entire `/data` volume or bind mount.
 - Restore by replacing `/data` with a known-good snapshot before starting the container.
 - Treat `/data/alexandria.db` and `/data/books/` as one unit. Restore them together.
