@@ -1,9 +1,13 @@
 <template>
   <div class="reader-page">
-    <NavBar />
+    <NavBar compact-mobile />
 
     <div class="reader-body">
-      <div class="reader-header" v-show="!loading && !epubError">
+      <div
+        class="reader-header"
+        :class="{ 'is-epub-reader': ttsSupported && book?.file_type === 'epub' }"
+        v-show="!loading && !epubError"
+      >
         <button class="btn-ghost back-btn" @click="$router.back()">← Library</button>
 
         <div class="book-info">
@@ -12,16 +16,51 @@
         </div>
 
         <div v-if="ttsSupported && book?.file_type === 'epub'" class="tts-toolbar">
-          <span class="tts-status" :class="ttsStatusClass">{{ ttsStatusLabel }}</span>
-          <button class="btn-ghost tts-btn" :disabled="!canStartTts" @click="toggleTts">
-            {{ ttsBtnLabel }}
+          <span class="tts-status" :class="ttsStatusClass">
+            <span class="tts-status-full">{{ ttsStatusLabel }}</span>
+            <span class="tts-status-compact">{{ ttsStatusCompactLabel }}</span>
+          </span>
+          <button
+            class="btn-ghost tts-btn tts-control"
+            :class="{ 'is-active': ttsMode === 'speaking' || ttsMode === 'paused' }"
+            :disabled="!canStartTts"
+            :aria-label="ttsBtnLabel"
+            :title="ttsBtnLabel"
+            @click="toggleTts"
+          >
+            <span class="tts-control-icon" aria-hidden="true">{{ ttsBtnIcon }}</span>
+            <span class="tts-control-label">{{ ttsBtnLabel }}</span>
           </button>
-          <button class="btn-ghost" :disabled="ttsMode === 'idle'" @click="stopTts">Stop</button>
-          <button class="btn-ghost" :disabled="!canChooseParagraph" @click="toggleParagraphPicker">
-            {{ chooseParagraphLabel }}
+          <button
+            class="btn-ghost tts-control"
+            :disabled="ttsMode === 'idle'"
+            aria-label="Stop"
+            title="Stop"
+            @click="stopTts"
+          >
+            <span class="tts-control-icon" aria-hidden="true">■</span>
+            <span class="tts-control-label">Stop</span>
           </button>
-          <button class="btn-ghost" @click="ttsSettingsOpen = !ttsSettingsOpen">
-            {{ ttsSettingsOpen ? 'Hide settings' : 'Settings' }}
+          <button
+            class="btn-ghost tts-control"
+            :class="{ 'is-active': ttsMode === 'selecting' }"
+            :disabled="!canChooseParagraph"
+            :aria-label="chooseParagraphLabel"
+            :title="chooseParagraphLabel"
+            @click="toggleParagraphPicker"
+          >
+            <span class="tts-control-icon" aria-hidden="true">{{ chooseParagraphIcon }}</span>
+            <span class="tts-control-label">{{ chooseParagraphLabel }}</span>
+          </button>
+          <button
+            class="btn-ghost tts-control"
+            :class="{ 'is-active': ttsSettingsOpen }"
+            :aria-label="settingsBtnLabel"
+            :title="settingsBtnLabel"
+            @click="ttsSettingsOpen = !ttsSettingsOpen"
+          >
+            <span class="tts-control-icon" aria-hidden="true">⚙</span>
+            <span class="tts-control-label">{{ settingsBtnLabel }}</span>
           </button>
 
           <div v-if="selectedStartBlockIndex >= 0" class="tts-start-chip">
@@ -193,6 +232,10 @@ const TTS_ACTIVE_ATTR = 'data-tts-active'
 const TTS_SELECTING_CLASS = 'alexandria-tts-selecting'
 const READER_THEME_LIGHT = 'alexandria-reader-light'
 const READER_THEME_DARK = 'alexandria-reader-dark'
+const TTS_VIEWPORT_OVERSCAN_PX = 260
+const TTS_HORIZONTAL_OVERSCAN_PX = 24
+const EPUB_SECTION_OVERSCAN_PX = 1200
+const EPUB_SECTION_OVERSCAN_DELTA_PX = 480
 const TTS_IFRAME_STYLES = `
   [${TTS_BLOCK_ATTR}] {
     transition: background-color 0.16s ease, box-shadow 0.16s ease, outline-color 0.16s ease;
@@ -235,6 +278,7 @@ interface ReadableBlock {
   sectionIndex: number
   element: HTMLElement
   contents: Contents
+  inViewport: boolean
 }
 
 interface ReaderPreferences {
@@ -247,6 +291,8 @@ interface StopTtsOptions {
 
 type ReaderRenditionOptions = NonNullable<Parameters<EpubBook['renderTo']>[1]> & {
   method: 'blobUrl'
+  offset: number
+  offsetDelta: number
 }
 
 const route = useRoute()
@@ -327,8 +373,21 @@ const ttsBtnLabel = computed(() => {
   return 'Read Aloud'
 })
 
+const ttsBtnIcon = computed(() => {
+  if (ttsMode.value === 'speaking') return '⏸'
+  return '▶'
+})
+
 const chooseParagraphLabel = computed(() => {
   return ttsMode.value === 'selecting' ? 'Cancel' : 'Choose paragraph'
+})
+
+const chooseParagraphIcon = computed(() => {
+  return ttsMode.value === 'selecting' ? '✕' : '¶'
+})
+
+const settingsBtnLabel = computed(() => {
+  return ttsSettingsOpen.value ? 'Hide settings' : 'Settings'
 })
 
 const ttsStatusLabel = computed(() => {
@@ -344,6 +403,14 @@ const ttsStatusLabel = computed(() => {
       ? `Reading paragraph ${currentSpokenBlockIndex.value + 1}`
       : 'Reading aloud'
   }
+  return 'Ready'
+})
+
+const ttsStatusCompactLabel = computed(() => {
+  if (!hasReadableText.value) return 'No text'
+  if (ttsMode.value === 'selecting') return 'Pick start'
+  if (ttsMode.value === 'paused') return 'Paused'
+  if (ttsMode.value === 'speaking') return 'Reading'
   return 'Ready'
 })
 
@@ -458,14 +525,19 @@ function persistReaderPreferences(): void {
 }
 
 function readerThemeRules(darkMode: boolean): Record<string, Record<string, string>> {
+  const bodyRules = {
+    'font-family': 'Georgia, serif',
+    'font-size': 'clamp(1rem, 0.98rem + 0.2vw, 1.05rem)',
+    'line-height': '1.7',
+    padding: '0 clamp(0.95rem, 4vw, 2rem) 1.6rem',
+  }
+
   if (darkMode) {
     return {
       body: {
+        ...bodyRules,
         background: '#111318',
         color: '#ece4d9',
-        'font-family': 'Georgia, serif',
-        'line-height': '1.7',
-        padding: '0 2rem',
       },
       a: {
         color: '#d7b777',
@@ -473,22 +545,34 @@ function readerThemeRules(darkMode: boolean): Record<string, Record<string, stri
       'h1, h2, h3, h4, h5, h6, strong, b': {
         color: '#f6efe5',
       },
+      'img, svg, video, canvas': {
+        'max-width': '100%',
+        height: 'auto',
+      },
+      pre: {
+        'white-space': 'pre-wrap',
+      },
     }
   }
 
   return {
     body: {
+      ...bodyRules,
       background: '#ffffff',
       color: '#1a1a1a',
-      'font-family': 'Georgia, serif',
-      'line-height': '1.7',
-      padding: '0 2rem',
     },
     a: {
       color: '#8b6a2f',
     },
     'h1, h2, h3, h4, h5, h6, strong, b': {
       color: '#1a1a1a',
+    },
+    'img, svg, video, canvas': {
+      'max-width': '100%',
+      height: 'auto',
+    },
+    pre: {
+      'white-space': 'pre-wrap',
     },
   }
 }
@@ -586,6 +670,8 @@ async function initEpub(arrayBuffer: ArrayBuffer): Promise<void> {
     spread: 'none',
     width: '100%',
     height: '100%',
+    offset: EPUB_SECTION_OVERSCAN_PX,
+    offsetDelta: EPUB_SECTION_OVERSCAN_DELTA_PX,
     allowScriptedContent: false,
     method: 'blobUrl',
   }
@@ -815,7 +901,12 @@ function elementStartRect(element: HTMLElement): DOMRect {
   return firstRect ?? element.getBoundingClientRect()
 }
 
-function isVisibleBlockElement(element: HTMLElement, contentsWindow: Window): boolean {
+function blockIntersectsViewport(
+  element: HTMLElement,
+  contentsWindow: Window,
+  verticalOverscanPx: number,
+  horizontalOverscanPx: number,
+): boolean {
   const styles = contentsWindow.getComputedStyle(element)
   if (styles.display === 'none' || styles.visibility === 'hidden' || Number(styles.opacity) === 0) {
     return false
@@ -835,17 +926,36 @@ function isVisibleBlockElement(element: HTMLElement, contentsWindow: Window): bo
     const absoluteBottom = frameRect.top + rect.bottom
 
     const horizontalOverlap =
-      Math.min(absoluteRight, readerRect.right) - Math.max(absoluteLeft, readerRect.left)
+      Math.min(absoluteRight, readerRect.right + horizontalOverscanPx) -
+      Math.max(absoluteLeft, readerRect.left - horizontalOverscanPx)
     const verticalOverlap =
-      Math.min(absoluteBottom, readerRect.bottom) - Math.max(absoluteTop, readerRect.top)
+      Math.min(absoluteBottom, readerRect.bottom + verticalOverscanPx) -
+      Math.max(absoluteTop, readerRect.top - verticalOverscanPx)
 
     return horizontalOverlap > 12 && verticalOverlap > 8
   }
 
-  const horizontalOverlap = Math.min(rect.right, contentsWindow.innerWidth) - Math.max(rect.left, 0)
-  const verticalOverlap = Math.min(rect.bottom, contentsWindow.innerHeight) - Math.max(rect.top, 0)
+  const horizontalOverlap =
+    Math.min(rect.right, contentsWindow.innerWidth + horizontalOverscanPx) -
+    Math.max(rect.left, -horizontalOverscanPx)
+  const verticalOverlap =
+    Math.min(rect.bottom, contentsWindow.innerHeight + verticalOverscanPx) -
+    Math.max(rect.top, -verticalOverscanPx)
 
   return horizontalOverlap > 12 && verticalOverlap > 8
+}
+
+function isBlockNearViewport(element: HTMLElement, contentsWindow: Window): boolean {
+  return blockIntersectsViewport(
+    element,
+    contentsWindow,
+    TTS_VIEWPORT_OVERSCAN_PX,
+    TTS_HORIZONTAL_OVERSCAN_PX,
+  )
+}
+
+function isBlockInViewport(element: HTMLElement, contentsWindow: Window): boolean {
+  return blockIntersectsViewport(element, contentsWindow, 0, 0)
 }
 
 function blockCfiFromElement(contents: Contents, element: HTMLElement): string | null {
@@ -924,7 +1034,7 @@ function refreshVisibleBlocks(): void {
       const text = normalizeText(element.innerText || element.textContent || '')
       if (!text) continue
       if (hasNestedReadableDescendant(element)) continue
-      if (!isVisibleBlockElement(element, contentsWindow)) continue
+      if (!isBlockNearViewport(element, contentsWindow)) continue
 
       const cfi = blockCfiFromElement(contents, element)
       if (!cfi) continue
@@ -936,6 +1046,7 @@ function refreshVisibleBlocks(): void {
         sectionIndex: contents.sectionIndex,
         element,
         contents,
+        inViewport: isBlockInViewport(element, contentsWindow),
       })
     }
   }
@@ -982,7 +1093,7 @@ function refreshVisibleBlocks(): void {
     logTtsDebug('resume-after-page-turn')
     clearPendingPageTurnResume()
     if (visibleBlocks.value.length > 0) {
-      speakBlockAtIndex(0)
+      speakBlockAtIndex(activeBlockIndex())
     } else {
       speakFallbackPageText()
     }
@@ -1049,6 +1160,8 @@ function applyUtteranceSettings(utterance: SpeechSynthesisUtterance): void {
 function activeBlockIndex(): number {
   if (currentSpokenBlockIndex.value >= 0) return currentSpokenBlockIndex.value
   if (selectedStartBlockIndex.value >= 0) return selectedStartBlockIndex.value
+  const firstViewportIndex = visibleBlocks.value.findIndex((block) => block.inViewport)
+  if (firstViewportIndex >= 0) return firstViewportIndex
   return 0
 }
 
@@ -1403,6 +1516,9 @@ onUnmounted(() => {
 <style scoped>
 .reader-page {
   height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1430,6 +1546,7 @@ onUnmounted(() => {
 
 .back-btn {
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .book-info {
@@ -1451,6 +1568,7 @@ onUnmounted(() => {
 .book-author {
   font-size: 0.8rem;
   color: var(--text-muted);
+  line-height: 1.35;
 }
 
 .tts-toolbar {
@@ -1459,12 +1577,14 @@ onUnmounted(() => {
   gap: 0.5rem;
   flex-wrap: wrap;
   justify-content: flex-end;
+  min-width: min(100%, 34rem);
 }
 
 .tts-status {
   display: inline-flex;
   align-items: center;
   min-height: 2rem;
+  max-width: 100%;
   padding: 0 0.7rem;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -1473,6 +1593,10 @@ onUnmounted(() => {
   font-size: 0.8rem;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.tts-status-compact {
+  display: none;
 }
 
 .tts-status.is-speaking {
@@ -1492,6 +1616,24 @@ onUnmounted(() => {
 
 .tts-btn {
   min-width: 6.25rem;
+}
+
+.tts-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.tts-control-icon {
+  font-size: 0.98rem;
+  line-height: 1;
+}
+
+.tts-control.is-active {
+  border-color: rgba(200, 169, 110, 0.45);
+  color: var(--accent);
+  background: rgba(200, 169, 110, 0.08);
 }
 
 .tts-start-chip {
@@ -1586,6 +1728,13 @@ onUnmounted(() => {
   padding: 0.75rem 1.25rem 0;
   color: var(--danger);
   font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.download-error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  line-height: 1.35;
 }
 
 .state-overlay {
@@ -1653,7 +1802,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: flex-end;
   gap: 0.75rem;
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 1rem calc(0.5rem + env(safe-area-inset-bottom));
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
@@ -1662,7 +1811,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.5rem 1.25rem;
+  padding: 0.5rem 1.25rem calc(0.5rem + env(safe-area-inset-bottom));
   border-top: 1px solid var(--border);
   background: var(--surface);
   flex-shrink: 0;
@@ -1670,6 +1819,7 @@ onUnmounted(() => {
 
 .nav-btn {
   flex-shrink: 0;
+  min-width: 6rem;
 }
 
 .progress-wrap {
@@ -1703,9 +1853,145 @@ onUnmounted(() => {
 }
 
 @media (max-width: 900px) {
+  .reader-header {
+    padding-inline: 1rem;
+  }
+
   .tts-toolbar {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .tts-settings-panel {
+    padding-inline: 1rem;
+  }
+
+  .tts-feedback {
+    padding-inline: 1rem;
+  }
+
+  .reader-footer {
+    padding-inline: 1rem;
+  }
+}
+
+@media (max-width: 760px) {
+  .reader-header {
+    padding: 0.7rem 0.85rem;
+  }
+
+  .reader-header.is-epub-reader {
+    padding: 0.55rem 0.75rem;
+  }
+
+  .reader-header.is-epub-reader .back-btn,
+  .reader-header.is-epub-reader .book-info {
+    display: none;
+  }
+
+  .reader-header.is-epub-reader .tts-toolbar {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+    gap: 0.45rem;
+  }
+
+  .reader-header.is-epub-reader .tts-status {
+    min-height: 0;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.72rem;
+  }
+
+  .reader-header.is-epub-reader .tts-status-full {
+    display: none;
+  }
+
+  .reader-header.is-epub-reader .tts-status-compact {
+    display: inline;
+  }
+
+  .reader-header.is-epub-reader .tts-control {
+    width: 2.7rem;
+    min-width: 2.7rem;
+    height: 2.7rem;
+    padding: 0;
+    border-radius: 0.85rem;
+  }
+
+  .reader-header.is-epub-reader .tts-control-label {
+    display: none;
+  }
+
+  .reader-header.is-epub-reader .tts-control-icon {
+    font-size: 1.02rem;
+  }
+
+  .reader-header.is-epub-reader .tts-start-chip {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    padding: 0.4rem 0.5rem 0.4rem 0.7rem;
+  }
+
+  .tts-settings-panel {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+    padding: 0.85rem 0.9rem 1rem;
+  }
+
+  .tts-slider-wrap {
+    gap: 0.6rem;
+  }
+
+  .tts-slider-value {
+    width: 3rem;
+  }
+
+  .tts-checkbox {
+    align-self: start;
+  }
+
+  .tts-feedback {
+    padding: 0.75rem 0.9rem 0;
+  }
+
+  .pdf-toolbar {
+    flex-wrap: wrap;
+    justify-content: stretch;
+    padding: 0.65rem 0.9rem calc(0.65rem + env(safe-area-inset-bottom));
+  }
+
+  .pdf-toolbar > .btn-ghost,
+  .pdf-toolbar > .download-error {
+    width: 100%;
+  }
+
+  .reader-footer {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .reader-header {
+    padding: 0.6rem 0.75rem;
+  }
+
+  .reader-header.is-epub-reader {
+    padding: 0.5rem 0.65rem;
+  }
+
+  .tts-start-chip {
+    font-size: 0.76rem;
+  }
+
+  .btn-inline {
+    padding: 0.28rem 0.55rem;
+  }
+
+  .reader-header.is-epub-reader .tts-control {
+    width: 2.55rem;
+    min-width: 2.55rem;
+    height: 2.55rem;
   }
 }
 </style>

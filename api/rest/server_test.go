@@ -299,6 +299,105 @@ func TestServeCoverStreamsDetectedContentType(t *testing.T) {
 	}
 }
 
+func TestSPAFallbackServesIndexOnlyForHTMLNavigations(t *testing.T) {
+	staticDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("<!DOCTYPE html><title>Alexandria</title>"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+
+	srv, _ := newStaticTestServer(t, staticDir)
+
+	req := httptest.NewRequest(http.MethodGet, "/library", nil)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("spa navigation request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 200, got %d: %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("expected no-cache for index.html, got %q", got)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Contains(body, []byte("Alexandria")) {
+		t.Fatalf("expected SPA shell body, got %s", body)
+	}
+}
+
+func TestSPAFallbackDoesNotServeIndexForMissingAssets(t *testing.T) {
+	staticDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("<!DOCTYPE html><title>Alexandria</title>"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+
+	srv, _ := newStaticTestServer(t, staticDir)
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/index-oldhash.js", nil)
+	req.Header.Set("Accept", "*/*")
+
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("missing asset request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 404, got %d: %s", resp.StatusCode, body)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if bytes.Contains(body, []byte("Alexandria")) {
+		t.Fatalf("expected missing asset to avoid SPA fallback, got %s", body)
+	}
+}
+
+func TestStaticAssetCacheHeaders(t *testing.T) {
+	staticDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(staticDir, "assets"), 0o755); err != nil {
+		t.Fatalf("mkdir assets: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("<!DOCTYPE html><title>Alexandria</title>"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "sw.js"), []byte("self.addEventListener('install', () => {})"), 0o644); err != nil {
+		t.Fatalf("write sw.js: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "assets", "app.js"), []byte("console.log('app')"), 0o644); err != nil {
+		t.Fatalf("write app.js: %v", err)
+	}
+
+	srv, _ := newStaticTestServer(t, staticDir)
+
+	swReq := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
+	swResp, err := srv.app.Test(swReq, -1)
+	if err != nil {
+		t.Fatalf("sw request: %v", err)
+	}
+	defer swResp.Body.Close()
+
+	if got := swResp.Header.Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("expected no-cache for sw.js, got %q", got)
+	}
+
+	assetReq := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	assetResp, err := srv.app.Test(assetReq, -1)
+	if err != nil {
+		t.Fatalf("asset request: %v", err)
+	}
+	defer assetResp.Body.Close()
+
+	if got := assetResp.Header.Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("expected immutable cache header for built assets, got %q", got)
+	}
+}
+
 func newTestServer(t *testing.T, uploadMaxBytes int) (*FiberServer, *config.Config) {
 	t.Helper()
 
@@ -352,10 +451,49 @@ func newTestServerWithConfig(t *testing.T, cfg *config.Config, ready func() erro
 		sqlite.NewListRepo(db),
 		storage.NewLocalFileStore(cfg.DataDir),
 		epub.New(),
+		nil,
 		cfg,
 	)
 
 	return New(application, "", cfg, ready), cfg, db
+}
+
+func newStaticTestServer(t *testing.T, staticDir string) (*FiberServer, *config.Config) {
+	t.Helper()
+
+	baseDir := t.TempDir()
+	cfg := &config.Config{
+		Port:             "0",
+		DataDir:          filepath.Join(baseDir, "data"),
+		DBPath:           filepath.Join(baseDir, "data", "alexandria.db"),
+		JWTSecret:        "test-secret-with-sufficient-length-123456",
+		JWTExpiry:        15 * time.Minute,
+		RefreshExpiry:    24 * time.Hour,
+		UploadMaxBytes:   8 * 1024 * 1024,
+		RegistrationMode: config.RegistrationModeSingle,
+	}
+
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+
+	db, err := sqlite.Open(cfg.DBPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+
+	application := app.New(
+		sqlite.NewUserRepo(db),
+		sqlite.NewBookRepo(db),
+		sqlite.NewProgressRepo(db),
+		sqlite.NewListRepo(db),
+		storage.NewLocalFileStore(cfg.DataDir),
+		epub.New(),
+		nil,
+		cfg,
+	)
+
+	return New(application, staticDir, cfg, nil), cfg
 }
 
 func startTestHTTPServer(t *testing.T, srv *FiberServer) string {

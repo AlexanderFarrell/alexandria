@@ -2,6 +2,7 @@ package rest
 
 import (
 	"log"
+	"path"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -82,11 +83,27 @@ func New(application *app.App, staticDir string, cfg *config.Config, readinessCh
 
 	// Serve the compiled Vue app for all non-API routes (SPA fallback)
 	if staticDir != "" {
+		f.Use(func(c *fiber.Ctx) error {
+			switch path := c.Path(); {
+			case path == "/" || path == "/index.html":
+				c.Set(fiber.HeaderCacheControl, "no-cache")
+			case path == "/sw.js" || path == "/registerSW.js" || path == "/manifest.webmanifest":
+				c.Set(fiber.HeaderCacheControl, "no-cache")
+			case strings.HasPrefix(path, "/assets/"):
+				c.Set(fiber.HeaderCacheControl, "public, max-age=31536000, immutable")
+			}
+			return c.Next()
+		})
+
 		f.Static("/", staticDir)
 		f.Get("*", func(c *fiber.Ctx) error {
 			if strings.HasPrefix(c.Path(), "/api/") || c.Path() == "/health" || c.Path() == "/readyz" {
 				return c.SendStatus(fiber.StatusNotFound)
 			}
+			if path.Ext(c.Path()) != "" || !strings.Contains(c.Get(fiber.HeaderAccept), fiber.MIMETextHTML) {
+				return c.SendStatus(fiber.StatusNotFound)
+			}
+			c.Set(fiber.HeaderCacheControl, "no-cache")
 			return c.SendFile(staticDir + "/index.html")
 		})
 	}
