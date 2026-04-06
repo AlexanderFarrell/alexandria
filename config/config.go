@@ -33,6 +33,8 @@ type Config struct {
 	UploadMaxBytes   int
 	RegistrationMode RegistrationMode
 	CORSAllowOrigins []string
+	MCPHTTPToken     string
+	MCPOwnerUsername string
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -47,6 +49,8 @@ func Load() *Config {
 		UploadMaxBytes:   getInt("UPLOAD_MAX_BYTES", 500*1024*1024),
 		RegistrationMode: getRegistrationMode("REGISTRATION_MODE", RegistrationModeSingle),
 		CORSAllowOrigins: getCSV("CORS_ALLOW_ORIGINS"),
+		MCPHTTPToken:     strings.TrimSpace(os.Getenv("MCP_HTTP_TOKEN")),
+		MCPOwnerUsername: strings.TrimSpace(os.Getenv("MCP_OWNER_USERNAME")),
 	}
 }
 
@@ -72,6 +76,14 @@ func (c *Config) Validate() error {
 		if origin == "*" {
 			return fmt.Errorf("CORS_ALLOW_ORIGINS must be an explicit allowlist; wildcard is not supported")
 		}
+	}
+
+	if strings.TrimSpace(c.MCPOwnerUsername) != c.MCPOwnerUsername {
+		return fmt.Errorf("MCP_OWNER_USERNAME must not contain leading or trailing whitespace")
+	}
+
+	if strings.TrimSpace(c.MCPHTTPToken) != c.MCPHTTPToken {
+		return fmt.Errorf("MCP_HTTP_TOKEN must not contain leading or trailing whitespace")
 	}
 
 	return nil

@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -230,6 +232,68 @@ func TestInternalErrorsAreRedacted(t *testing.T) {
 	}
 }
 
+func TestMCPRouteDisabledWithoutToken(t *testing.T) {
+	srv, _ := newTestServer(t, 8*1024*1024)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("disabled mcp request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 404, got %d: %s", resp.StatusCode, body)
+	}
+}
+
+func TestMCPRouteRequiresBearerToken(t *testing.T) {
+	baseDir := t.TempDir()
+	srv, _, _ := newTestServerWithConfig(t, &config.Config{
+		Port:             "0",
+		DataDir:          filepath.Join(baseDir, "data"),
+		DBPath:           filepath.Join(baseDir, "data", "alexandria.db"),
+		JWTSecret:        "test-secret-with-sufficient-length-123456",
+		JWTExpiry:        15 * time.Minute,
+		RefreshExpiry:    24 * time.Hour,
+		UploadMaxBytes:   8 * 1024 * 1024,
+		RegistrationMode: config.RegistrationModeSingle,
+		MCPHTTPToken:     "mcp-secret",
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("unauthenticated mcp request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 401, got %d: %s", resp.StatusCode, body)
+	}
+
+	authReq := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(`{}`))
+	authReq.Header.Set("Content-Type", "application/json")
+	authReq.Header.Set("Authorization", "Bearer mcp-secret")
+
+	authResp, err := srv.app.Test(authReq, -1)
+	if err != nil {
+		t.Fatalf("authenticated mcp request: %v", err)
+	}
+	defer authResp.Body.Close()
+
+	if authResp.StatusCode == http.StatusUnauthorized || authResp.StatusCode == http.StatusNotFound {
+		body, _ := io.ReadAll(authResp.Body)
+		t.Fatalf("expected authenticated MCP request to reach the handler, got %d: %s", authResp.StatusCode, body)
+	}
+}
+
 func TestServeCoverStreamsDetectedContentType(t *testing.T) {
 	baseDir := t.TempDir()
 	srv, cfg, db := newTestServerWithConfig(t, &config.Config{
@@ -299,6 +363,266 @@ func TestServeCoverStreamsDetectedContentType(t *testing.T) {
 	}
 }
 
+func TestReaderManifestAndSectionRequireAuth(t *testing.T) {
+	srv, _ := newTestServer(t, 8*1024*1024)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/some-book/reader/manifest", nil)
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("manifest request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 401 for unauthenticated manifest, got %d: %s", resp.StatusCode, body)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/some-book/reader/sections/chap-1", nil)
+	resp, err = srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("section request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 401 for unauthenticated section, got %d: %s", resp.StatusCode, body)
+	}
+}
+
+func TestReaderEndpointsServeManifestSectionsAndSignedAssets(t *testing.T) {
+	baseDir := t.TempDir()
+	srv, cfg, db := newTestServerWithConfig(t, &config.Config{
+		Port:             "0",
+		DataDir:          filepath.Join(baseDir, "data"),
+		DBPath:           filepath.Join(baseDir, "data", "alexandria.db"),
+		JWTSecret:        "test-secret-with-sufficient-length-123456",
+		JWTExpiry:        15 * time.Minute,
+		RefreshExpiry:    24 * time.Hour,
+		UploadMaxBytes:   8 * 1024 * 1024,
+		RegistrationMode: config.RegistrationModeSingle,
+	}, nil)
+	token := registerTestUser(t, srv, "reader_manifest_user")
+
+	createStoredEPUBBook(t, cfg, db, "reader-book", buildReaderFixtureEPUBForServer(t))
+	createStoredEPUBBook(t, cfg, db, "reader-book-two", buildReaderFixtureEPUBForServer(t))
+
+	manifestReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/reader-book/reader/manifest", nil)
+	manifestReq.Header.Set("Authorization", "Bearer "+token)
+	manifestResp, err := srv.app.Test(manifestReq, -1)
+	if err != nil {
+		t.Fatalf("manifest request: %v", err)
+	}
+	defer manifestResp.Body.Close()
+
+	if manifestResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(manifestResp.Body)
+		t.Fatalf("expected status 200, got %d: %s", manifestResp.StatusCode, body)
+	}
+
+	var manifestPayload struct {
+		Manifest struct {
+			FirstSectionID string `json:"first_section_id"`
+			Sections       []struct {
+				ID string `json:"id"`
+			} `json:"sections"`
+		} `json:"manifest"`
+	}
+	if err := json.NewDecoder(manifestResp.Body).Decode(&manifestPayload); err != nil {
+		t.Fatalf("decode manifest response: %v", err)
+	}
+	if manifestPayload.Manifest.FirstSectionID != "chap-1" {
+		t.Fatalf("expected first section chap-1, got %q", manifestPayload.Manifest.FirstSectionID)
+	}
+	if len(manifestPayload.Manifest.Sections) != 3 {
+		t.Fatalf("expected 3 sections, got %d", len(manifestPayload.Manifest.Sections))
+	}
+
+	sectionReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/reader-book/reader/sections/chap-1", nil)
+	sectionReq.Header.Set("Authorization", "Bearer "+token)
+	sectionResp, err := srv.app.Test(sectionReq, -1)
+	if err != nil {
+		t.Fatalf("section request: %v", err)
+	}
+	defer sectionResp.Body.Close()
+
+	if sectionResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(sectionResp.Body)
+		t.Fatalf("expected status 200, got %d: %s", sectionResp.StatusCode, body)
+	}
+
+	var sectionPayload struct {
+		Section struct {
+			HTML string `json:"html"`
+		} `json:"section"`
+	}
+	if err := json.NewDecoder(sectionResp.Body).Decode(&sectionPayload); err != nil {
+		t.Fatalf("decode section response: %v", err)
+	}
+
+	if !strings.Contains(sectionPayload.Section.HTML, `data-reader-section-id="chap-2"`) {
+		t.Fatalf("expected cross-section link rewrite, got %s", sectionPayload.Section.HTML)
+	}
+
+	stylesheetURL := extractReaderAssetURL(t, sectionPayload.Section.HTML, `(/api/v1/books/reader-book/reader/assets/OEBPS/styles/book\.css\?rt=[^"]+)`)
+	assetReq := httptest.NewRequest(http.MethodGet, stylesheetURL, nil)
+	assetResp, err := srv.app.Test(assetReq, -1)
+	if err != nil {
+		t.Fatalf("stylesheet asset request: %v", err)
+	}
+	defer assetResp.Body.Close()
+
+	if assetResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(assetResp.Body)
+		t.Fatalf("expected status 200 for signed stylesheet asset, got %d: %s", assetResp.StatusCode, body)
+	}
+	if got := assetResp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/css") {
+		t.Fatalf("expected css content type, got %q", got)
+	}
+
+	cssBody, _ := io.ReadAll(assetResp.Body)
+	imageURL := extractReaderAssetURL(t, string(cssBody), `(/api/v1/books/reader-book/reader/assets/OEBPS/images/pic\.png\?rt=[^")]+)`)
+	imageReq := httptest.NewRequest(http.MethodGet, imageURL, nil)
+	imageResp, err := srv.app.Test(imageReq, -1)
+	if err != nil {
+		t.Fatalf("image asset request: %v", err)
+	}
+	defer imageResp.Body.Close()
+
+	if imageResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(imageResp.Body)
+		t.Fatalf("expected status 200 for signed image asset, got %d: %s", imageResp.StatusCode, body)
+	}
+	if got := imageResp.Header.Get("Content-Type"); got != "image/png" {
+		t.Fatalf("expected image/png content type, got %q", got)
+	}
+
+	wrongBookReq := httptest.NewRequest(http.MethodGet, strings.Replace(stylesheetURL, "/reader-book/", "/reader-book-two/", 1), nil)
+	wrongBookResp, err := srv.app.Test(wrongBookReq, -1)
+	if err != nil {
+		t.Fatalf("wrong-book asset request: %v", err)
+	}
+	defer wrongBookResp.Body.Close()
+
+	if wrongBookResp.StatusCode != http.StatusUnauthorized {
+		body, _ := io.ReadAll(wrongBookResp.Body)
+		t.Fatalf("expected status 401 for wrong-book asset token, got %d: %s", wrongBookResp.StatusCode, body)
+	}
+
+	traversalURL := strings.Replace(stylesheetURL, "OEBPS/styles/book.css", "%2E%2E/%2E%2E/META-INF/container.xml", 1)
+	traversalReq := httptest.NewRequest(http.MethodGet, traversalURL, nil)
+	traversalResp, err := srv.app.Test(traversalReq, -1)
+	if err != nil {
+		t.Fatalf("traversal asset request: %v", err)
+	}
+	defer traversalResp.Body.Close()
+
+	if traversalResp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(traversalResp.Body)
+		t.Fatalf("expected status 404 for traversal asset request, got %d: %s", traversalResp.StatusCode, body)
+	}
+}
+
+func TestSPAFallbackServesIndexOnlyForHTMLNavigations(t *testing.T) {
+	staticDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("<!DOCTYPE html><title>Alexandria</title>"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+
+	srv, _ := newStaticTestServer(t, staticDir)
+
+	req := httptest.NewRequest(http.MethodGet, "/library", nil)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("spa navigation request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 200, got %d: %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("expected no-cache for index.html, got %q", got)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Contains(body, []byte("Alexandria")) {
+		t.Fatalf("expected SPA shell body, got %s", body)
+	}
+}
+
+func TestSPAFallbackDoesNotServeIndexForMissingAssets(t *testing.T) {
+	staticDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("<!DOCTYPE html><title>Alexandria</title>"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+
+	srv, _ := newStaticTestServer(t, staticDir)
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/index-oldhash.js", nil)
+	req.Header.Set("Accept", "*/*")
+
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("missing asset request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 404, got %d: %s", resp.StatusCode, body)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if bytes.Contains(body, []byte("Alexandria")) {
+		t.Fatalf("expected missing asset to avoid SPA fallback, got %s", body)
+	}
+}
+
+func TestStaticAssetCacheHeaders(t *testing.T) {
+	staticDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(staticDir, "assets"), 0o755); err != nil {
+		t.Fatalf("mkdir assets: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("<!DOCTYPE html><title>Alexandria</title>"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "sw.js"), []byte("self.addEventListener('install', () => {})"), 0o644); err != nil {
+		t.Fatalf("write sw.js: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "assets", "app.js"), []byte("console.log('app')"), 0o644); err != nil {
+		t.Fatalf("write app.js: %v", err)
+	}
+
+	srv, _ := newStaticTestServer(t, staticDir)
+
+	swReq := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
+	swResp, err := srv.app.Test(swReq, -1)
+	if err != nil {
+		t.Fatalf("sw request: %v", err)
+	}
+	defer swResp.Body.Close()
+
+	if got := swResp.Header.Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("expected no-cache for sw.js, got %q", got)
+	}
+
+	assetReq := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	assetResp, err := srv.app.Test(assetReq, -1)
+	if err != nil {
+		t.Fatalf("asset request: %v", err)
+	}
+	defer assetResp.Body.Close()
+
+	if got := assetResp.Header.Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("expected immutable cache header for built assets, got %q", got)
+	}
+}
+
 func newTestServer(t *testing.T, uploadMaxBytes int) (*FiberServer, *config.Config) {
 	t.Helper()
 
@@ -352,10 +676,49 @@ func newTestServerWithConfig(t *testing.T, cfg *config.Config, ready func() erro
 		sqlite.NewListRepo(db),
 		storage.NewLocalFileStore(cfg.DataDir),
 		epub.New(),
+		nil,
 		cfg,
 	)
 
 	return New(application, "", cfg, ready), cfg, db
+}
+
+func newStaticTestServer(t *testing.T, staticDir string) (*FiberServer, *config.Config) {
+	t.Helper()
+
+	baseDir := t.TempDir()
+	cfg := &config.Config{
+		Port:             "0",
+		DataDir:          filepath.Join(baseDir, "data"),
+		DBPath:           filepath.Join(baseDir, "data", "alexandria.db"),
+		JWTSecret:        "test-secret-with-sufficient-length-123456",
+		JWTExpiry:        15 * time.Minute,
+		RefreshExpiry:    24 * time.Hour,
+		UploadMaxBytes:   8 * 1024 * 1024,
+		RegistrationMode: config.RegistrationModeSingle,
+	}
+
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+
+	db, err := sqlite.Open(cfg.DBPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+
+	application := app.New(
+		sqlite.NewUserRepo(db),
+		sqlite.NewBookRepo(db),
+		sqlite.NewProgressRepo(db),
+		sqlite.NewListRepo(db),
+		storage.NewLocalFileStore(cfg.DataDir),
+		epub.New(),
+		nil,
+		cfg,
+	)
+
+	return New(application, staticDir, cfg, nil), cfg
 }
 
 func startTestHTTPServer(t *testing.T, srv *FiberServer) string {
@@ -483,6 +846,157 @@ func getAuthStatus(t *testing.T, srv *FiberServer) struct {
 		t.Fatalf("decode auth status response: %v", err)
 	}
 	return payload
+}
+
+func buildReaderFixtureEPUBForServer(t *testing.T) []byte {
+	t.Helper()
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	writeZipEntry(t, zipWriter, "mimetype", []byte("application/epub+zip"))
+	writeZipEntry(t, zipWriter, "META-INF/container.xml", []byte(`<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`))
+	writeZipEntry(t, zipWriter, "OEBPS/content.opf", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Reader Fixture</dc:title>
+    <dc:creator>Fixture Author</dc:creator>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="css" href="styles/book.css" media-type="text/css"/>
+    <item id="img" href="images/pic.png" media-type="image/png"/>
+    <item id="chap-1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chap-2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chap-3" href="text/ch3.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="chap-1"/>
+    <itemref idref="chap-2"/>
+    <itemref idref="chap-3"/>
+  </spine>
+</package>`))
+	writeZipEntry(t, zipWriter, "OEBPS/nav.xhtml", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+  <head><title>Nav</title></head>
+  <body>
+    <nav epub:type="toc">
+      <ol>
+        <li><a href="text/ch2.xhtml">Second Chapter</a></li>
+        <li><a href="text/ch1.xhtml">First Chapter</a></li>
+      </ol>
+    </nav>
+  </body>
+</html>`))
+	writeZipEntry(t, zipWriter, "OEBPS/toc.ncx", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="one" playOrder="1">
+      <navLabel><text>First Chapter</text></navLabel>
+      <content src="text/ch1.xhtml"/>
+    </navPoint>
+    <navPoint id="two" playOrder="2">
+      <navLabel><text>Second Chapter</text></navLabel>
+      <content src="text/ch2.xhtml"/>
+    </navPoint>
+  </navMap>
+</ncx>`))
+	writeZipEntry(t, zipWriter, "OEBPS/styles/book.css", []byte(`body { background-image: url('../images/pic.png'); }`))
+	writeZipEntry(t, zipWriter, "OEBPS/images/pic.png", []byte{
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+		0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41,
+		0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+		0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+		0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+		0x42, 0x60, 0x82,
+	})
+	writeZipEntry(t, zipWriter, "OEBPS/text/ch1.xhtml", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <title>Chapter One</title>
+    <link rel="stylesheet" href="../styles/book.css"/>
+  </head>
+  <body>
+    <h1>Chapter One</h1>
+    <p><a href="ch2.xhtml#part-two">Next section</a></p>
+  </body>
+</html>`))
+	writeZipEntry(t, zipWriter, "OEBPS/text/ch2.xhtml", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Chapter Two</title></head>
+  <body>
+    <h1 id="part-two">Chapter Two</h1>
+    <p>Two.</p>
+  </body>
+</html>`))
+	writeZipEntry(t, zipWriter, "OEBPS/text/ch3.xhtml", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Chapter Three</title></head>
+  <body>
+    <h1>Chapter Three</h1>
+  </body>
+</html>`))
+
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close zip writer: %v", err)
+	}
+	return buffer.Bytes()
+}
+
+func writeZipEntry(t *testing.T, writer *zip.Writer, name string, payload []byte) {
+	t.Helper()
+	entry, err := writer.Create(name)
+	if err != nil {
+		t.Fatalf("create zip entry %s: %v", name, err)
+	}
+	if _, err := entry.Write(payload); err != nil {
+		t.Fatalf("write zip entry %s: %v", name, err)
+	}
+}
+
+func createStoredEPUBBook(t *testing.T, cfg *config.Config, db *gorm.DB, bookID string, payload []byte) {
+	t.Helper()
+	filePath := filepath.Join("books", bookID, "original.epub")
+	fullPath := filepath.Join(cfg.DataDir, filePath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("mkdir book dir: %v", err)
+	}
+	if err := os.WriteFile(fullPath, payload, 0o644); err != nil {
+		t.Fatalf("write epub fixture: %v", err)
+	}
+
+	book := &domain.Book{
+		ID:        bookID,
+		Title:     "Fixture Book",
+		Author:    "Fixture Author",
+		FilePath:  filePath,
+		FileType:  domain.FileTypeEPUB,
+		FileSize:  int64(len(payload)),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := sqlite.NewBookRepo(db).Create(context.Background(), book); err != nil {
+		t.Fatalf("create book fixture: %v", err)
+	}
+}
+
+func extractReaderAssetURL(t *testing.T, body string, pattern string) string {
+	t.Helper()
+	re := regexp.MustCompile(pattern)
+	match := re.FindStringSubmatch(body)
+	if len(match) < 2 {
+		t.Fatalf("failed to find asset url with pattern %q in %s", pattern, body)
+	}
+	return match[1]
 }
 
 func fakeEPUBPayload(size int) []byte {

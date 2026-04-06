@@ -26,13 +26,43 @@ export interface ReadingProgress {
   id: string
   user_id: string
   book_id: string
-  cfi: string
+  section_id: string
+  section_progress: number
+  block_index?: number
   percentage: number
   rating?: number // 1–5; absent means unrated
   zealot_progress_ref?: string
   started_at: string
   last_read_at: string
   finished_at?: string
+}
+
+export interface ReaderSectionSummary {
+  id: string
+  title: string
+  index: number
+}
+
+export interface ReaderNavItem {
+  label: string
+  section_id?: string
+  fragment?: string
+  children?: ReaderNavItem[]
+}
+
+export interface ReaderManifest {
+  sections: ReaderSectionSummary[]
+  nav: ReaderNavItem[]
+  first_section_id: string
+}
+
+export interface ReaderSection {
+  id: string
+  title: string
+  section_index: number
+  prev_section_id?: string
+  next_section_id?: string
+  html: string
 }
 
 export interface User {

@@ -138,7 +138,12 @@ def test_save_and_get_progress(auth_client: httpx.Client):
     # Save progress
     r = auth_client.put(
         f"/api/v1/books/{book_id}/progress",
-        json={"cfi": "epubcfi(/6/4!/4/2/2:0)", "percentage": 0.25},
+        json={
+            "section_id": "section-1",
+            "section_progress": 0.25,
+            "block_index": None,
+            "percentage": 0.25,
+        },
     )
     assert r.status_code == 200
     progress = r.json()["progress"]

@@ -37,6 +37,15 @@ func (r *memoryUserRepo) Count(_ context.Context) (int64, error) {
 	return int64(len(r.byID)), nil
 }
 
+func (r *memoryUserRepo) List(_ context.Context) ([]*domain.User, error) {
+	users := make([]*domain.User, 0, len(r.byID))
+	for _, user := range r.byID {
+		clone := *user
+		users = append(users, &clone)
+	}
+	return users, nil
+}
+
 func (r *memoryUserRepo) GetByID(_ context.Context, id string) (*domain.User, error) {
 	user, ok := r.byID[id]
 	if !ok {

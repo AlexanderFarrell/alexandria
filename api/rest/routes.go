@@ -35,6 +35,7 @@ func (s *FiberServer) registerRoutes(
 	auth.Post("/register", authH.Register)
 	auth.Post("/login", authH.Login)
 	auth.Post("/refresh", authH.Refresh)
+	v1.Get("/books/:id/reader/assets/*", readerH.ServeAsset)
 
 	// Protected routes
 	protected := v1.Use(mw.JWT(s.authSvc))
@@ -53,6 +54,8 @@ func (s *FiberServer) registerRoutes(
 	books.Get("/:id/content", bookH.ServeContent)
 	books.Get("/:id/cover", bookH.ServeCover)
 	books.Post("/:id/refresh", bookH.RefreshMetadata)
+	books.Get("/:id/reader/manifest", readerH.GetManifest)
+	books.Get("/:id/reader/sections/:sectionID", readerH.GetSection)
 	books.Get("/:id/progress", readerH.GetProgress)
 	books.Put("/:id/progress", readerH.SaveProgress)
 

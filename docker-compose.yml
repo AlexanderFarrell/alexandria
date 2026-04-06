@@ -4,7 +4,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./data:/data
+      - alexandria-data:/data
     environment:
       PORT: "8080"
       DATA_DIR: /data
@@ -16,3 +16,6 @@ services:
       UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-104857600}
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-}
     restart: unless-stopped
+
+volumes:
+  alexandria-data:

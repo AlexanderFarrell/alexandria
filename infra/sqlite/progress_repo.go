@@ -27,7 +27,9 @@ func (r *progressRepo) Save(ctx context.Context, p *domain.ReadingProgress) erro
 		ID:                p.ID,
 		UserID:            p.UserID,
 		BookID:            p.BookID,
-		CFI:               p.CFI,
+		SectionID:         p.SectionID,
+		SectionProgress:   p.SectionProgress,
+		BlockIndex:        p.BlockIndex,
 		Percentage:        p.Percentage,
 		Rating:            p.Rating,
 		ZealotProgressRef: p.ZealotProgressRef,
@@ -38,7 +40,7 @@ func (r *progressRepo) Save(ctx context.Context, p *domain.ReadingProgress) erro
 	err := r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "user_id"}, {Name: "book_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"cfi", "percentage", "rating", "zealot_progress_ref", "last_read_at", "finished_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"section_id", "section_progress", "block_index", "percentage", "rating", "zealot_progress_ref", "last_read_at", "finished_at"}),
 		}).
 		Create(&m).Error
 	if err != nil {
@@ -80,7 +82,9 @@ func fromProgressModel(m *ProgressModel) *domain.ReadingProgress {
 		ID:                m.ID,
 		UserID:            m.UserID,
 		BookID:            m.BookID,
-		CFI:               m.CFI,
+		SectionID:         m.SectionID,
+		SectionProgress:   m.SectionProgress,
+		BlockIndex:        m.BlockIndex,
 		Percentage:        m.Percentage,
 		Rating:            m.Rating,
 		ZealotProgressRef: m.ZealotProgressRef,

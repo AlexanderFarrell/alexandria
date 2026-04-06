@@ -99,21 +99,22 @@ export const useBooksStore = defineStore('books', () => {
     return res.progress
   }
 
-  async function saveProgress(bookId: string, cfi: string, percentage: number) {
-    const res = await booksApi.saveProgress(bookId, cfi, percentage)
+  async function saveProgress(bookId: string, payload: booksApi.SaveProgressPayload) {
+    const res = await booksApi.saveProgress(bookId, payload)
     currentProgress.value = res.progress
   }
 
   async function rateBook(bookId: string, rating: number) {
-    // Fetch latest progress first so we don't clobber cfi/percentage
+    // Fetch latest progress first so we don't clobber section/percentage state.
     const existing = await booksApi.getProgress(bookId)
     const p = existing.progress
-    const res = await booksApi.saveProgress(
-      bookId,
-      p?.cfi ?? '',
-      p?.percentage ?? 0,
+    const res = await booksApi.saveProgress(bookId, {
+      section_id: p?.section_id ?? '',
+      section_progress: p?.section_progress ?? 0,
+      block_index: p?.block_index ?? null,
+      percentage: p?.percentage ?? 0,
       rating,
-    )
+    })
     currentProgress.value = res.progress
     return res.progress
   }
