@@ -1,4 +1,4 @@
-.PHONY: dev dev-server dev-client build test lint docker-build docker-up setup clean
+.PHONY: dev dev-server dev-client build build-desktop build-ios build-android test lint docker-build docker-up setup clean
 
 # ── Development ──────────────────────────────────────────────────────────────
 dev:
@@ -6,6 +6,9 @@ dev:
 
 dev-server:
 	@go run ./cmd/server
+
+dev-server-tauri:
+	@CORS_ALLOW_ORIGINS="tauri://localhost,https://tauri.localhost,http://tauri.localhost,http://localhost:5173" go run ./cmd/server
 
 dev-client:
 	@cd client && npm run dev
@@ -20,6 +23,18 @@ build-server:
 build-client:
 	@cd client && npm run build
 	@echo "✓ client assets at client/dist"
+
+build-desktop:
+	@cd client && npx tauri build
+	@echo "✓ desktop app built"
+
+build-ios:
+	@cd client && npx tauri ios build
+	@echo "✓ iOS app built"
+
+build-android:
+	@cd client && npx tauri android build
+	@echo "✓ Android app built"
 
 # ── Testing ──────────────────────────────────────────────────────────────────
 test: test-go test-e2e

@@ -9,6 +9,7 @@ import type {
   ReaderSection,
   ReadingProgress,
 } from '@/types'
+import { useServerConfigStore } from '@/stores/serverConfig'
 
 export interface ListParams {
   search?: string
@@ -21,20 +22,15 @@ export interface ListParams {
 }
 
 export async function listBooks(params: ListParams = {}): Promise<BooksListResponse> {
-  const { data } = await client.get('/books', { params })
-  return data
+  return client.get('/books', { params: params as Record<string, string | number | boolean | null | undefined> })
 }
 
 export async function getBook(id: string): Promise<{ book: Book }> {
-  const { data } = await client.get(`/books/${id}`)
-  return data
+  return client.get(`/books/${id}`)
 }
 
 export async function uploadBook(formData: FormData): Promise<{ book: Book }> {
-  const { data } = await client.post('/books', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  })
-  return data
+  return client.post('/books', formData)
 }
 
 export interface BookUpdatePayload {
@@ -47,44 +43,45 @@ export interface BookUpdatePayload {
 }
 
 export async function updateBook(id: string, updates: BookUpdatePayload): Promise<{ book: Book }> {
-  const { data } = await client.put(`/books/${id}`, updates)
-  return data
+  return client.put(`/books/${id}`, updates)
 }
 
 export async function deleteBook(id: string): Promise<void> {
-  await client.delete(`/books/${id}`)
+  return client.delete(`/books/${id}`)
+}
+
+function getServerBase(): string {
+  try {
+    const cfg = useServerConfigStore()
+    if (cfg.serverUrl) return cfg.serverUrl
+  } catch {
+    // Outside Pinia context
+  }
+  return ''
 }
 
 export function coverUrl(id: string): string {
-  return `/api/v1/books/${id}/cover`
+  return `${getServerBase()}/api/v1/books/${id}/cover`
 }
 
 export async function getCoverBlob(id: string): Promise<Blob> {
-  const { data } = await client.get(`/books/${id}/cover`, {
-    responseType: 'blob',
-  })
-  return data
+  return client.get(`/books/${id}/cover`, { blob: true })
 }
 
 export function contentUrl(id: string): string {
-  return `/api/v1/books/${id}/content`
+  return `${getServerBase()}/api/v1/books/${id}/content`
 }
 
 export async function getContentBlob(id: string): Promise<Blob> {
-  const { data } = await client.get(`/books/${id}/content`, {
-    responseType: 'blob',
-  })
-  return data
+  return client.get(`/books/${id}/content`, { blob: true })
 }
 
 export async function refreshMetadata(id: string): Promise<{ book: Book }> {
-  const { data } = await client.post(`/books/${id}/refresh`)
-  return data
+  return client.post(`/books/${id}/refresh`)
 }
 
 export async function getProgress(bookId: string): Promise<{ progress: ReadingProgress | null }> {
-  const { data } = await client.get(`/books/${bookId}/progress`)
-  return data
+  return client.get(`/books/${bookId}/progress`)
 }
 
 export interface SaveProgressPayload {
@@ -103,29 +100,24 @@ export async function saveProgress(bookId: string, payload: SaveProgressPayload)
   }
   if (payload.block_index !== undefined) body.block_index = payload.block_index
   if (payload.rating !== undefined) body.rating = payload.rating
-  const { data } = await client.put(`/books/${bookId}/progress`, body)
-  return data
+  return client.put(`/books/${bookId}/progress`, body)
 }
 
 export async function getReaderManifest(bookId: string): Promise<{ manifest: ReaderManifest }> {
-  const { data } = await client.get(`/books/${bookId}/reader/manifest`)
-  return data
+  return client.get(`/books/${bookId}/reader/manifest`)
 }
 
 export async function getReaderSection(
   bookId: string,
   sectionId: string,
 ): Promise<{ section: ReaderSection }> {
-  const { data } = await client.get(`/books/${bookId}/reader/sections/${encodeURIComponent(sectionId)}`)
-  return data
+  return await client.get(`/books/${bookId}/reader/sections/${encodeURIComponent(sectionId)}`)
 }
 
 export async function listAuthors(): Promise<{ authors: AuthorSummary[] }> {
-  const { data } = await client.get('/books/authors')
-  return data
+  return client.get('/books/authors')
 }
 
 export async function listGenres(): Promise<{ genres: GenreSummary[] }> {
-  const { data } = await client.get('/books/genres')
-  return data
+  return client.get('/books/genres')
 }

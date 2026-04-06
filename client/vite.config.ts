@@ -3,6 +3,8 @@ import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 import { resolve } from 'path'
 
+const isNative = process.env.BUILD_TARGET === 'tauri'
+
 export default defineConfig({
   plugins: [
     vue(),
@@ -76,12 +78,14 @@ export default defineConfig({
       devOptions: { enabled: false },
     }),
   ],
+  base: isNative ? './' : '/',
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
     },
   },
   server: {
+    host: "0.0.0.0",
     port: 5173,
     proxy: {
       '/api': {

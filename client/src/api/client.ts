@@ -1,102 +1,163 @@
-import axios, { AxiosHeaders, type AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import { getAccessToken, getRefreshToken, storeTokens, clearStoredSession } from '@/utils/auth'
+import { useServerConfigStore } from '@/stores/serverConfig'
 import type { Tokens } from '@/types'
-import { clearStoredSession, getAccessToken, getRefreshToken, storeTokens } from '@/utils/auth'
 
-const baseConfig = {
-  baseURL: '/api/v1',
-  headers: { 'Content-Type': 'application/json' },
-}
-
-interface RetryableRequestConfig extends InternalAxiosRequestConfig {
-  _retry?: boolean
-}
-
-const client = axios.create(baseConfig)
-const refreshClient = axios.create(baseConfig)
-let refreshPromise: Promise<string> | null = null
-
-function setAuthorizationHeader(config: InternalAxiosRequestConfig, token: string) {
-  const value = `Bearer ${token}`
-  if (config.headers && typeof config.headers.set === 'function') {
-    config.headers.set('Authorization', value)
-    return
-  }
-  const headers = AxiosHeaders.from(config.headers ?? {})
-  headers.set('Authorization', value)
-  config.headers = headers
-}
-
-function isPublicAuthRequest(url?: string): boolean {
-  return url === '/auth/login' || url === '/auth/register' || url === '/auth/status'
-}
-
-function isRefreshRequest(url?: string): boolean {
-  return url === '/auth/refresh'
-}
-
-function clearSessionAndRedirect() {
-  clearStoredSession()
+let _onSessionExpired = () => {
   if (window.location.pathname !== '/login') {
     window.location.href = '/login'
   }
 }
 
-async function requestTokenRefresh(): Promise<string> {
-  const refreshToken = getRefreshToken()
-  if (!refreshToken) {
-    throw new Error('missing refresh token')
-  }
-
-  const { data } = await refreshClient.post<{ tokens: Tokens }>('/auth/refresh', {
-    refresh_token: refreshToken,
-  })
-  storeTokens(data.tokens)
-  return data.tokens.access_token
+export function setSessionExpiredHandler(fn: () => void) {
+  _onSessionExpired = fn
 }
 
-// Attach access token to every request
-client.interceptors.request.use((config) => {
-  const token = getAccessToken()
-  if (token) {
-    setAuthorizationHeader(config, token)
+function getBaseURL(): string {
+  try {
+    const cfg = useServerConfigStore()
+    if (cfg.serverUrl) return cfg.serverUrl + '/api/v1'
+  } catch {
+    // Pinia not yet initialized
   }
-  return config
-})
+  return '/api/v1'
+}
 
-// Refresh expired access tokens once, then retry the failed request.
-client.interceptors.response.use(
-  (res) => res,
-  async (err: AxiosError) => {
-    const originalRequest = err.config as RetryableRequestConfig | undefined
-    const status = err.response?.status
-    const url = originalRequest?.url
+function buildURL(path: string, params?: Record<string, string | number | boolean | null | undefined>): string {
+  let url = getBaseURL() + path
+  if (params) {
+    const qs = new URLSearchParams(
+      Object.entries(params)
+        .filter(([, v]) => v != null && v !== '')
+        .map(([k, v]) => [k, String(v)]),
+    ).toString()
+    if (qs) url += '?' + qs
+  }
+  return url
+}
 
-    if (status !== 401 || !originalRequest || isPublicAuthRequest(url)) {
-      return Promise.reject(err)
-    }
+function isPublicPath(path: string): boolean {
+  return path === '/auth/login' || path === '/auth/register' || path === '/auth/status'
+}
 
-    if (originalRequest._retry || isRefreshRequest(url) || !getRefreshToken()) {
+// Deduplicates concurrent refresh attempts
+let refreshPromise: Promise<void> | null = null
+
+async function ensureTokenRefresh(): Promise<void> {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const refreshToken = getRefreshToken()
+      if (!refreshToken) throw new Error('no refresh token')
+      const res = await fetch(getBaseURL() + '/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      })
+      if (!res.ok) throw new Error('refresh failed')
+      const { tokens } = (await res.json()) as { tokens: Tokens }
+      storeTokens(tokens)
+    })().finally(() => {
+      refreshPromise = null
+    })
+  }
+  return refreshPromise
+}
+
+function clearSessionAndRedirect() {
+  clearStoredSession()
+  _onSessionExpired()
+}
+
+interface RequestOptions {
+  params?: Record<string, string | number | boolean | null | undefined>
+  body?: unknown
+  headers?: Record<string, string>
+  blob?: boolean
+  arrayBuffer?: boolean
+}
+
+// Throws an axios-shaped error so existing view error handlers keep working:
+// (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+class ApiError extends Error {
+  response: { status: number; data: unknown }
+  constructor(status: number, data: unknown) {
+    super(`API error ${status}`)
+    this.response = { status, data }
+  }
+}
+
+async function rawRequest(
+  method: string,
+  path: string,
+  options: RequestOptions,
+): Promise<Response> {
+  const headers: Record<string, string> = { ...options.headers }
+
+  const token = getAccessToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const isFormData = options.body instanceof FormData
+  if (!isFormData && options.body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+  }
+
+  return fetch(buildURL(path, options.params), {
+    method,
+    headers,
+    body: isFormData
+      ? (options.body as FormData)
+      : options.body !== undefined
+        ? JSON.stringify(options.body)
+        : undefined,
+  })
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  options: RequestOptions = {},
+  isRetry = false,
+): Promise<T> {
+  const res = await rawRequest(method, path, options)
+
+  // 401: attempt token refresh then retry once
+  if (res.status === 401 && !isRetry && !isPublicPath(path)) {
+    if (!getRefreshToken()) {
       clearSessionAndRedirect()
-      return Promise.reject(err)
+      throw new ApiError(401, { error: 'Session expired' })
     }
-
-    originalRequest._retry = true
-
     try {
-      if (!refreshPromise) {
-        refreshPromise = requestTokenRefresh().finally(() => {
-          refreshPromise = null
-        })
-      }
-
-      const accessToken = await refreshPromise
-      setAuthorizationHeader(originalRequest, accessToken)
-      return client(originalRequest)
-    } catch (refreshErr) {
+      await ensureTokenRefresh()
+      return request<T>(method, path, options, true)
+    } catch {
       clearSessionAndRedirect()
-      return Promise.reject(refreshErr)
+      throw new ApiError(401, { error: 'Session expired' })
     }
+  }
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+    throw new ApiError(res.status, data)
+  }
+
+  if (options.blob) return res.blob() as T
+  if (options.arrayBuffer) return res.arrayBuffer() as T
+  if (res.status === 204) return undefined as T
+  return res.json() as T
+}
+
+const client = {
+  get<T>(path: string, options: Omit<RequestOptions, 'body'> = {}): Promise<T> {
+    return request<T>('GET', path, options)
   },
-)
+  post<T>(path: string, body?: unknown, options: Omit<RequestOptions, 'body'> = {}): Promise<T> {
+    return request<T>('POST', path, { ...options, body })
+  },
+  put<T>(path: string, body?: unknown, options: Omit<RequestOptions, 'body'> = {}): Promise<T> {
+    return request<T>('PUT', path, { ...options, body })
+  },
+  delete<T = void>(path: string): Promise<T> {
+    return request<T>('DELETE', path)
+  },
+}
 
 export default client

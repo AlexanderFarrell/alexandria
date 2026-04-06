@@ -9,6 +9,5 @@ export interface MetadataSearchParams {
 }
 
 export async function searchMetadata(params: MetadataSearchParams): Promise<MetadataSearchResponse> {
-  const { data } = await client.get('/metadata/search', { params })
-  return data
+  return client.get('/metadata/search', { params: params as Record<string, string | number | boolean | null | undefined> })
 }

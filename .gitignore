@@ -1,3 +1,4 @@
 /data/
 /client/node_modules/
 /build-docker.yml
+/client/src-tauri/target
