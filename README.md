@@ -44,6 +44,16 @@ make dev        # starts Go server on :8080 + Vite on :5173
 
 The Vite dev server proxies `/api` → `:8080`, so hot-reload works for frontend changes.
 
+For a local MCP integration over stdio, run:
+
+```bash
+go run ./cmd/mcp-server
+```
+
+For remote MCP clients, set `MCP_HTTP_TOKEN` and use the Streamable HTTP endpoint at `/mcp`.
+Tool IDs are underscore-separated, for example `books_search` and `reader_get_manifest`, to stay compatible with MCP hosts that forward tool calls through OpenAI-style function calling.
+`books_search` uses an MCP-specific default page size of `100` and caps each call at `200` results.
+
 ---
 
 ## Configuration
@@ -61,6 +71,8 @@ All config is via environment variables:
 | `REGISTRATION_MODE` | `single` | `disable`, `single`, or `multi`. `multi` shares one global library across all accounts |
 | `CORS_ALLOW_ORIGINS` | unset | Comma-separated allowlist for cross-origin API access. Leave unset for same-origin deployments |
 | `UPLOAD_MAX_BYTES` | `524288000` | Maximum request body size for book uploads (500 MiB) |
+| `MCP_HTTP_TOKEN` | unset | Enables the authenticated MCP Streamable HTTP endpoint at `/mcp` when set |
+| `MCP_OWNER_USERNAME` | unset | Optional Alexandria username to use for MCP user-scoped tools/resources; required for multi-user deployments if you want progress or list operations |
 
 ---
 
@@ -121,6 +133,7 @@ PUT    /api/v1/books/:id/progress   { cfi, percentage }
 
 GET    /health
 GET    /readyz
+POST   /mcp                       Streamable HTTP MCP endpoint when `MCP_HTTP_TOKEN` is set
 ```
 
 All `/api/v1/*` routes except `GET /api/v1/auth/status` require `Authorization: Bearer <access_token>`.

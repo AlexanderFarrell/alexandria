@@ -22,6 +22,20 @@ func TestLoadDefaultsRegistrationModeToSingle(t *testing.T) {
 	}
 }
 
+func TestLoadTrimsMCPConfig(t *testing.T) {
+	t.Setenv("MCP_HTTP_TOKEN", "  token-value  ")
+	t.Setenv("MCP_OWNER_USERNAME", "  owner  ")
+
+	cfg := Load()
+
+	if cfg.MCPHTTPToken != "token-value" {
+		t.Fatalf("expected trimmed MCP token, got %q", cfg.MCPHTTPToken)
+	}
+	if cfg.MCPOwnerUsername != "owner" {
+		t.Fatalf("expected trimmed MCP owner username, got %q", cfg.MCPOwnerUsername)
+	}
+}
+
 func TestValidateRejectsDefaultJWTSecret(t *testing.T) {
 	cfg := &Config{
 		JWTSecret:        defaultJWTSecretPlaceholder,

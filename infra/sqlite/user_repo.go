@@ -43,6 +43,19 @@ func (r *userRepo) Count(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
+func (r *userRepo) List(ctx context.Context) ([]*domain.User, error) {
+	var models []UserModel
+	if err := r.db.WithContext(ctx).Order("created_at ASC").Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+
+	users := make([]*domain.User, len(models))
+	for index := range models {
+		users[index] = fromUserModel(&models[index])
+	}
+	return users, nil
+}
+
 func (r *userRepo) GetByID(ctx context.Context, id string) (*domain.User, error) {
 	var m UserModel
 	err := r.db.WithContext(ctx).First(&m, "id = ?", id).Error

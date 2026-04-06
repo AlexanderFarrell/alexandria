@@ -232,6 +232,68 @@ func TestInternalErrorsAreRedacted(t *testing.T) {
 	}
 }
 
+func TestMCPRouteDisabledWithoutToken(t *testing.T) {
+	srv, _ := newTestServer(t, 8*1024*1024)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("disabled mcp request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 404, got %d: %s", resp.StatusCode, body)
+	}
+}
+
+func TestMCPRouteRequiresBearerToken(t *testing.T) {
+	baseDir := t.TempDir()
+	srv, _, _ := newTestServerWithConfig(t, &config.Config{
+		Port:             "0",
+		DataDir:          filepath.Join(baseDir, "data"),
+		DBPath:           filepath.Join(baseDir, "data", "alexandria.db"),
+		JWTSecret:        "test-secret-with-sufficient-length-123456",
+		JWTExpiry:        15 * time.Minute,
+		RefreshExpiry:    24 * time.Hour,
+		UploadMaxBytes:   8 * 1024 * 1024,
+		RegistrationMode: config.RegistrationModeSingle,
+		MCPHTTPToken:     "mcp-secret",
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("unauthenticated mcp request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected status 401, got %d: %s", resp.StatusCode, body)
+	}
+
+	authReq := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBufferString(`{}`))
+	authReq.Header.Set("Content-Type", "application/json")
+	authReq.Header.Set("Authorization", "Bearer mcp-secret")
+
+	authResp, err := srv.app.Test(authReq, -1)
+	if err != nil {
+		t.Fatalf("authenticated mcp request: %v", err)
+	}
+	defer authResp.Body.Close()
+
+	if authResp.StatusCode == http.StatusUnauthorized || authResp.StatusCode == http.StatusNotFound {
+		body, _ := io.ReadAll(authResp.Body)
+		t.Fatalf("expected authenticated MCP request to reach the handler, got %d: %s", authResp.StatusCode, body)
+	}
+}
+
 func TestServeCoverStreamsDetectedContentType(t *testing.T) {
 	baseDir := t.TempDir()
 	srv, cfg, db := newTestServerWithConfig(t, &config.Config{

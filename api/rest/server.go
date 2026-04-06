@@ -6,10 +6,12 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
+	"alexandria/api/mcpserver"
 	"alexandria/api/rest/handlers"
 	"alexandria/app"
 	"alexandria/app/services"
@@ -80,6 +82,10 @@ func New(application *app.App, staticDir string, cfg *config.Config, readinessCh
 	metadataH := handlers.NewMetadataHandler(application.Metadata)
 
 	s.registerRoutes(authH, bookH, readerH, listH, metadataH)
+
+	if mcpHandler := mcpserver.New(application, cfg).AuthenticatedHTTPHandler(); mcpHandler != nil {
+		f.All("/mcp", adaptor.HTTPHandler(mcpHandler))
+	}
 
 	// Serve the compiled Vue app for all non-API routes (SPA fallback)
 	if staticDir != "" {
