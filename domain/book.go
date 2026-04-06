@@ -21,6 +21,16 @@ type BookMetadata struct {
 	Tags        []string   `json:"tags,omitempty"`
 }
 
+// BookLink is an external URL associated with a book (e.g. YouTube audiobook, purchase link).
+type BookLink struct {
+	ID        string    `json:"id"`
+	BookID    string    `json:"book_id"`
+	Label     string    `json:"label"`
+	URL       string    `json:"url"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // Book is the central domain object representing an item in the library.
 type Book struct {
 	ID             string       `json:"id"`
@@ -33,6 +43,7 @@ type Book struct {
 	FileSize       int64        `json:"file_size"`
 	Metadata       BookMetadata `json:"metadata"`
 	ZealotTicketID *string      `json:"zealot_ticket_id,omitempty"`
+	Links          []BookLink   `json:"links,omitempty"`
 	CreatedAt      time.Time    `json:"created_at"`
 	UpdatedAt      time.Time    `json:"updated_at"`
 }

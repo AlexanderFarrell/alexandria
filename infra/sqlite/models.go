@@ -79,3 +79,15 @@ type BookListItemModel struct {
 }
 
 func (BookListItemModel) TableName() string { return "book_list_items" }
+
+// BookLinkModel is the GORM persistence model for a BookLink.
+type BookLinkModel struct {
+	ID        string `gorm:"primaryKey"`
+	BookID    string `gorm:"not null;index"`
+	Label     string `gorm:"not null"`
+	URL       string `gorm:"not null"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (BookLinkModel) TableName() string { return "book_links" }

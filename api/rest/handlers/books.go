@@ -36,6 +36,8 @@ func (h *BookHandler) List(c *fiber.Ctx) error {
 		Search:    c.Query("search"),
 		Author:    c.Query("author"),
 		Genre:     c.Query("genre"),
+		Publisher: c.Query("publisher"),
+		Year:      queryInt(c, "year", 0),
 		UserID:    userID,
 		SortBy:    c.Query("sort_by"),
 		SortOrder: c.Query("sort_order"),
@@ -53,6 +55,24 @@ func (h *BookHandler) List(c *fiber.Ctx) error {
 		"page":  filter.Page,
 		"limit": filter.Limit,
 	})
+}
+
+// ListPublishers handles GET /api/v1/books/publishers
+func (h *BookHandler) ListPublishers(c *fiber.Ctx) error {
+	publishers, err := h.books.ListPublishers(c.Context())
+	if err != nil {
+		return respondErr(c, err)
+	}
+	return c.JSON(fiber.Map{"publishers": publishers})
+}
+
+// ListYears handles GET /api/v1/books/years
+func (h *BookHandler) ListYears(c *fiber.Ctx) error {
+	years, err := h.books.ListYears(c.Context())
+	if err != nil {
+		return respondErr(c, err)
+	}
+	return c.JSON(fiber.Map{"years": years})
 }
 
 // ListAuthors handles GET /api/v1/books/authors
@@ -259,6 +279,45 @@ func (h *BookHandler) ServeCover(c *fiber.Ctx) error {
 	}
 	c.Set("Content-Type", http.DetectContentType(header))
 	return c.SendStream(readCloserStream{Reader: buffered, Closer: rc})
+}
+
+type linkRequest struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
+// AddLink handles POST /api/v1/books/:id/links
+func (h *BookHandler) AddLink(c *fiber.Ctx) error {
+	var req linkRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	link, err := h.books.AddLink(c.Context(), c.Params("id"), req.Label, req.URL)
+	if err != nil {
+		return respondErr(c, err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"link": link})
+}
+
+// UpdateLink handles PUT /api/v1/books/:id/links/:linkId
+func (h *BookHandler) UpdateLink(c *fiber.Ctx) error {
+	var req linkRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	link, err := h.books.UpdateLink(c.Context(), c.Params("id"), c.Params("linkId"), req.Label, req.URL)
+	if err != nil {
+		return respondErr(c, err)
+	}
+	return c.JSON(fiber.Map{"link": link})
+}
+
+// DeleteLink handles DELETE /api/v1/books/:id/links/:linkId
+func (h *BookHandler) DeleteLink(c *fiber.Ctx) error {
+	if err := h.books.DeleteLink(c.Context(), c.Params("id"), c.Params("linkId")); err != nil {
+		return respondErr(c, err)
+	}
+	return c.JSON(fiber.Map{"message": "deleted"})
 }
 
 // parseDateInput accepts YYYY-MM-DD (from HTML date inputs) or RFC3339.

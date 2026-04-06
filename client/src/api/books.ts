@@ -2,9 +2,12 @@ import client from './client'
 import type {
   AuthorSummary,
   Book,
+  BookLink,
   BookMetadata,
   BooksListResponse,
   GenreSummary,
+  PublisherSummary,
+  YearSummary,
   ReaderManifest,
   ReaderSection,
   ReadingProgress,
@@ -15,7 +18,9 @@ export interface ListParams {
   search?: string
   author?: string
   genre?: string
-  sort_by?: 'title' | 'author' | 'created_at' | 'rating' | 'file_size'
+  publisher?: string
+  year?: number
+  sort_by?: 'title' | 'author' | 'created_at' | 'rating' | 'file_size' | 'published_at'
   sort_order?: 'asc' | 'desc'
   page?: number
   limit?: number
@@ -120,4 +125,33 @@ export async function listAuthors(): Promise<{ authors: AuthorSummary[] }> {
 
 export async function listGenres(): Promise<{ genres: GenreSummary[] }> {
   return client.get('/books/genres')
+}
+
+export async function listPublishers(): Promise<{ publishers: PublisherSummary[] }> {
+  return client.get('/books/publishers')
+}
+
+export async function listYears(): Promise<{ years: YearSummary[] }> {
+  return client.get('/books/years')
+}
+
+export interface LinkPayload {
+  label: string
+  url: string
+}
+
+export async function addBookLink(bookId: string, payload: LinkPayload): Promise<{ link: BookLink }> {
+  return client.post(`/books/${bookId}/links`, payload)
+}
+
+export async function updateBookLink(
+  bookId: string,
+  linkId: string,
+  payload: LinkPayload,
+): Promise<{ link: BookLink }> {
+  return client.put(`/books/${bookId}/links/${linkId}`, payload)
+}
+
+export async function deleteBookLink(bookId: string, linkId: string): Promise<void> {
+  return client.delete(`/books/${bookId}/links/${linkId}`)
 }

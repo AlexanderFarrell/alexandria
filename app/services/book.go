@@ -281,6 +281,80 @@ func (s *BookService) ListGenres(ctx context.Context) ([]repos.GenreSummary, err
 	return s.books.ListGenres(ctx)
 }
 
+// ListPublishers returns all distinct publishers with their book counts.
+func (s *BookService) ListPublishers(ctx context.Context) ([]repos.PublisherSummary, error) {
+	return s.books.ListPublishers(ctx)
+}
+
+// ListYears returns all distinct publication years with their book counts.
+func (s *BookService) ListYears(ctx context.Context) ([]repos.YearSummary, error) {
+	return s.books.ListYears(ctx)
+}
+
+// AddLink validates and creates a new external link for the given book.
+func (s *BookService) AddLink(ctx context.Context, bookID, label, rawURL string) (*domain.BookLink, error) {
+	if _, err := s.books.GetByID(ctx, bookID); err != nil {
+		return nil, err
+	}
+	if label == "" {
+		return nil, fmt.Errorf("%w: label is required", domain.ErrBadRequest)
+	}
+	if err := validateLinkURL(rawURL); err != nil {
+		return nil, fmt.Errorf("%w: %s", domain.ErrBadRequest, err)
+	}
+	now := time.Now()
+	link := &domain.BookLink{
+		ID:        uuid.NewString(),
+		BookID:    bookID,
+		Label:     label,
+		URL:       rawURL,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.books.AddLink(ctx, link); err != nil {
+		return nil, err
+	}
+	return link, nil
+}
+
+// UpdateLink replaces the label and URL of an existing link.
+func (s *BookService) UpdateLink(ctx context.Context, bookID, linkID, label, rawURL string) (*domain.BookLink, error) {
+	if label == "" {
+		return nil, fmt.Errorf("%w: label is required", domain.ErrBadRequest)
+	}
+	if err := validateLinkURL(rawURL); err != nil {
+		return nil, fmt.Errorf("%w: %s", domain.ErrBadRequest, err)
+	}
+	if _, err := s.books.GetByID(ctx, bookID); err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	link := &domain.BookLink{
+		ID:        linkID,
+		BookID:    bookID,
+		Label:     label,
+		URL:       rawURL,
+		UpdatedAt: now,
+	}
+	if err := s.books.UpdateLink(ctx, link); err != nil {
+		return nil, err
+	}
+	return link, nil
+}
+
+// DeleteLink removes a link from a book.
+func (s *BookService) DeleteLink(ctx context.Context, bookID, linkID string) error {
+	return s.books.DeleteLink(ctx, bookID, linkID)
+}
+
+func validateLinkURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("URL must be a valid http or https address")
+	}
+	return nil
+}
+
 // OpenCover returns a reader for the book's cover image along with the file's modification time.
 func (s *BookService) OpenCover(ctx context.Context, id string) (io.ReadCloser, time.Time, error) {
 	book, err := s.books.GetByID(ctx, id)

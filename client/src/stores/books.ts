@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as booksApi from '@/api/books'
-import type { AuthorSummary, Book, GenreSummary, ReadingProgress } from '@/types'
+import type { AuthorSummary, Book, BookLink, GenreSummary, PublisherSummary, YearSummary, ReadingProgress } from '@/types'
 
 const PAGE_SIZE = 24
 
@@ -17,6 +17,8 @@ export const useBooksStore = defineStore('books', () => {
 
   const authors = ref<AuthorSummary[]>([])
   const genres = ref<GenreSummary[]>([])
+  const publishers = ref<PublisherSummary[]>([])
+  const years = ref<YearSummary[]>([])
   const sortBy = ref<booksApi.ListParams['sort_by']>('created_at')
   const sortOrder = ref<booksApi.ListParams['sort_order']>('desc')
 
@@ -137,6 +139,48 @@ export const useBooksStore = defineStore('books', () => {
     genres.value = res.genres ?? []
   }
 
+  async function fetchPublishers() {
+    const res = await booksApi.listPublishers()
+    publishers.value = res.publishers ?? []
+  }
+
+  async function fetchYears() {
+    const res = await booksApi.listYears()
+    years.value = res.years ?? []
+  }
+
+  async function addBookLink(bookId: string, payload: booksApi.LinkPayload): Promise<BookLink> {
+    const res = await booksApi.addBookLink(bookId, payload)
+    if (currentBook.value?.id === bookId) {
+      currentBook.value = {
+        ...currentBook.value,
+        links: [...(currentBook.value.links ?? []), res.link],
+      }
+    }
+    return res.link
+  }
+
+  async function updateBookLink(bookId: string, linkId: string, payload: booksApi.LinkPayload): Promise<BookLink> {
+    const res = await booksApi.updateBookLink(bookId, linkId, payload)
+    if (currentBook.value?.id === bookId) {
+      currentBook.value = {
+        ...currentBook.value,
+        links: (currentBook.value.links ?? []).map((l) => (l.id === linkId ? res.link : l)),
+      }
+    }
+    return res.link
+  }
+
+  async function deleteBookLink(bookId: string, linkId: string): Promise<void> {
+    await booksApi.deleteBookLink(bookId, linkId)
+    if (currentBook.value?.id === bookId) {
+      currentBook.value = {
+        ...currentBook.value,
+        links: (currentBook.value.links ?? []).filter((l) => l.id !== linkId),
+      }
+    }
+  }
+
   async function setSort(
     by: booksApi.ListParams['sort_by'],
     order: booksApi.ListParams['sort_order'],
@@ -157,6 +201,8 @@ export const useBooksStore = defineStore('books', () => {
     loadingMore,
     authors,
     genres,
+    publishers,
+    years,
     sortBy,
     sortOrder,
     fetchBooks,
@@ -169,8 +215,13 @@ export const useBooksStore = defineStore('books', () => {
     saveProgress,
     rateBook,
     refreshBookMetadata,
+    addBookLink,
+    updateBookLink,
+    deleteBookLink,
     fetchAuthors,
     fetchGenres,
+    fetchPublishers,
+    fetchYears,
     setSort,
   }
 })

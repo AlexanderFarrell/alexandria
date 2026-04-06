@@ -11,8 +11,10 @@ type BookFilter struct {
 	Search    string
 	Author    string
 	Genre     string
+	Publisher string
+	Year      int    // 0 means no filter
 	UserID    string // used for rating-sort JOIN
-	SortBy    string // "title" | "author" | "created_at" | "rating" — default "created_at"
+	SortBy    string // "title" | "author" | "created_at" | "rating" | "published_at" — default "created_at"
 	SortOrder string // "asc" | "desc" — default "desc"
 	Page      int
 	Limit     int
@@ -30,6 +32,18 @@ type GenreSummary struct {
 	Count int    `json:"count"`
 }
 
+// PublisherSummary is a distinct publisher with a book count.
+type PublisherSummary struct {
+	Publisher string `json:"publisher"`
+	Count     int    `json:"count"`
+}
+
+// YearSummary is a distinct publication year with a book count.
+type YearSummary struct {
+	Year  int `json:"year"`
+	Count int `json:"count"`
+}
+
 // BookRepo is the data-access interface for books.
 type BookRepo interface {
 	Create(ctx context.Context, book *domain.Book) error
@@ -39,4 +53,11 @@ type BookRepo interface {
 	Delete(ctx context.Context, id string) error
 	ListAuthors(ctx context.Context) ([]AuthorSummary, error)
 	ListGenres(ctx context.Context) ([]GenreSummary, error)
+	ListPublishers(ctx context.Context) ([]PublisherSummary, error)
+	ListYears(ctx context.Context) ([]YearSummary, error)
+	// Link management
+	AddLink(ctx context.Context, link *domain.BookLink) error
+	UpdateLink(ctx context.Context, link *domain.BookLink) error
+	DeleteLink(ctx context.Context, bookID, linkID string) error
+	ListLinks(ctx context.Context, bookID string) ([]domain.BookLink, error)
 }

@@ -75,6 +75,20 @@
             </div>
             <span class="progress-label">{{ Math.round(progress.percentage * 100) }}% read</span>
           </div>
+
+          <div v-if="book.links?.length" class="links-section">
+            <p class="meta-label">Links</p>
+            <div class="links-list">
+              <a
+                v-for="link in book.links"
+                :key="link.id"
+                :href="link.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="link-item"
+              >{{ link.label }}</a>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -311,6 +325,27 @@ function formatDate(iso: string) {
   font-size: 0.8rem;
   color: var(--text-muted);
   white-space: nowrap;
+}
+.links-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.links-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.link-item {
+  font-size: 0.85rem;
+  color: var(--accent);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-item:hover {
+  text-decoration: underline;
 }
 .modal-actions {
   display: flex;

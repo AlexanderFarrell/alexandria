@@ -1,5 +1,5 @@
 <template>
-  <div class="book-card card" @click="$emit('show-detail', book)">
+  <div class="book-card card" :class="{ 'is-selected': selected }" @click="$emit('show-detail', book)">
     <div class="cover-wrap">
       <img
         v-if="coverSrc"
@@ -10,6 +10,14 @@
       />
       <div v-else class="cover-placeholder">
         <span>{{ initials }}</span>
+      </div>
+      <div v-if="selectable" class="select-overlay" @click.stop>
+        <input
+          type="checkbox"
+          class="select-checkbox"
+          :checked="selected"
+          @change="$emit('toggle-select', book.id)"
+        />
       </div>
     </div>
     <div class="info">
@@ -33,9 +41,14 @@ import RatingStars from './RatingStars.vue'
 const props = defineProps<{
   book: Book
   progress?: ReadingProgress | null
+  selectable?: boolean
+  selected?: boolean
 }>()
 
-defineEmits<{ (e: 'show-detail', book: Book): void }>()
+defineEmits<{
+  (e: 'show-detail', book: Book): void
+  (e: 'toggle-select', id: string): void
+}>()
 
 const coverSrc = useBookCover(
   () => props.book.id,
@@ -67,6 +80,31 @@ const initials = computed(() => {
   aspect-ratio: 2 / 3;
   overflow: hidden;
   background: var(--surface-hover);
+  position: relative;
+}
+
+.select-overlay {
+  position: absolute;
+  top: 0.4rem;
+  left: 0.4rem;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+.select-checkbox {
+  width: 1.1rem;
+  height: 1.1rem;
+  cursor: pointer;
+  accent-color: var(--accent);
+  border-radius: 0.2rem;
+}
+.book-card:hover .select-overlay,
+.book-card.is-selected .select-overlay {
+  opacity: 1;
+}
+.book-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 .cover {
   width: 100%;

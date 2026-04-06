@@ -9,20 +9,17 @@
           <h3 class="sidebar-heading">Authors</h3>
           <ul class="filter-list">
             <li>
-              <button
-                class="filter-item"
-                :class="{ active: !selectedAuthor }"
-                @click="setAuthorFilter('')"
-              >All</button>
+              <button class="filter-item" :class="{ active: !selectedAuthor }" @click="setAuthorFilter('')">All</button>
             </li>
-            <li v-for="a in books.authors" :key="a.author">
-              <button
-                class="filter-item"
-                :class="{ active: selectedAuthor === a.author }"
-                @click="setAuthorFilter(a.author)"
-              >
+            <li v-for="a in (expandedSidebar.authors ? books.authors : books.authors.slice(0, SIDEBAR_LIMIT))" :key="a.author">
+              <button class="filter-item" :class="{ active: selectedAuthor === a.author }" @click="setAuthorFilter(a.author)">
                 <span class="filter-name">{{ a.author }}</span>
                 <span class="filter-count">{{ a.count }}</span>
+              </button>
+            </li>
+            <li v-if="books.authors.length > SIDEBAR_LIMIT">
+              <button class="filter-item show-more" @click="expandedSidebar.authors = !expandedSidebar.authors">
+                {{ expandedSidebar.authors ? 'Show less' : `+${books.authors.length - SIDEBAR_LIMIT} more` }}
               </button>
             </li>
           </ul>
@@ -32,20 +29,57 @@
           <h3 class="sidebar-heading">Genres</h3>
           <ul class="filter-list">
             <li>
-              <button
-                class="filter-item"
-                :class="{ active: !selectedGenre }"
-                @click="setGenreFilter('')"
-              >All</button>
+              <button class="filter-item" :class="{ active: !selectedGenre }" @click="setGenreFilter('')">All</button>
             </li>
-            <li v-for="g in books.genres" :key="g.genre">
-              <button
-                class="filter-item"
-                :class="{ active: selectedGenre === g.genre }"
-                @click="setGenreFilter(g.genre)"
-              >
+            <li v-for="g in (expandedSidebar.genres ? books.genres : books.genres.slice(0, SIDEBAR_LIMIT))" :key="g.genre">
+              <button class="filter-item" :class="{ active: selectedGenre === g.genre }" @click="setGenreFilter(g.genre)">
                 <span class="filter-name">{{ g.genre }}</span>
                 <span class="filter-count">{{ g.count }}</span>
+              </button>
+            </li>
+            <li v-if="books.genres.length > SIDEBAR_LIMIT">
+              <button class="filter-item show-more" @click="expandedSidebar.genres = !expandedSidebar.genres">
+                {{ expandedSidebar.genres ? 'Show less' : `+${books.genres.length - SIDEBAR_LIMIT} more` }}
+              </button>
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="books.publishers.length > 0" class="sidebar-section">
+          <h3 class="sidebar-heading">Publishers</h3>
+          <ul class="filter-list">
+            <li>
+              <button class="filter-item" :class="{ active: !selectedPublisher }" @click="setPublisherFilter('')">All</button>
+            </li>
+            <li v-for="p in (expandedSidebar.publishers ? books.publishers : books.publishers.slice(0, SIDEBAR_LIMIT))" :key="p.publisher">
+              <button class="filter-item" :class="{ active: selectedPublisher === p.publisher }" @click="setPublisherFilter(p.publisher)">
+                <span class="filter-name">{{ p.publisher }}</span>
+                <span class="filter-count">{{ p.count }}</span>
+              </button>
+            </li>
+            <li v-if="books.publishers.length > SIDEBAR_LIMIT">
+              <button class="filter-item show-more" @click="expandedSidebar.publishers = !expandedSidebar.publishers">
+                {{ expandedSidebar.publishers ? 'Show less' : `+${books.publishers.length - SIDEBAR_LIMIT} more` }}
+              </button>
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="books.years.length > 0" class="sidebar-section">
+          <h3 class="sidebar-heading">Year</h3>
+          <ul class="filter-list">
+            <li>
+              <button class="filter-item" :class="{ active: !selectedYear }" @click="setYearFilter(0)">All</button>
+            </li>
+            <li v-for="y in (expandedSidebar.years ? books.years : books.years.slice(0, SIDEBAR_LIMIT))" :key="y.year">
+              <button class="filter-item" :class="{ active: selectedYear === y.year }" @click="setYearFilter(y.year)">
+                <span class="filter-name">{{ y.year }}</span>
+                <span class="filter-count">{{ y.count }}</span>
+              </button>
+            </li>
+            <li v-if="books.years.length > SIDEBAR_LIMIT">
+              <button class="filter-item show-more" @click="expandedSidebar.years = !expandedSidebar.years">
+                {{ expandedSidebar.years ? 'Show less' : `+${books.years.length - SIDEBAR_LIMIT} more` }}
               </button>
             </li>
           </ul>
@@ -57,6 +91,7 @@
         <div class="toolbar">
           <div class="search-wrap">
             <input
+              ref="searchInputRef"
               v-model="search"
               type="search"
               placeholder="Search books…"
@@ -70,11 +105,17 @@
               <option value="author">Author</option>
               <option value="rating">My rating</option>
               <option value="file_size">File size</option>
+              <option value="published_at">Year published</option>
             </select>
             <button class="sort-dir btn-ghost" @click="toggleSortDir" :title="sortOrderVal === 'asc' ? 'Ascending' : 'Descending'">
               {{ sortOrderVal === 'asc' ? '↑' : '↓' }}
             </button>
           </div>
+          <button
+            class="btn-ghost view-toggle"
+            :title="viewMode === 'grid' ? 'Switch to table view' : 'Switch to grid view'"
+            @click="viewMode = viewMode === 'grid' ? 'table' : 'grid'"
+          >{{ viewMode === 'grid' ? '☰' : '⊞' }}</button>
           <button class="btn-ghost filter-toggle" @click="showFilters = !showFilters">Filters</button>
           <button class="btn-primary" @click="openUploadModal">+ Add book</button>
         </div>
@@ -84,15 +125,65 @@
           <p>No books found.</p>
           <button class="btn-primary" @click="openUploadModal">Add your first book</button>
         </div>
-        <div v-else class="grid">
+        <div v-else-if="viewMode === 'grid'" class="grid">
           <BookCard
             v-for="book in books.books"
             :key="book.id"
             :book="book"
             :progress="progressMap[book.id]"
+            :selectable="true"
+            :selected="selection.isSelected(book.id)"
             @show-detail="openDetail"
+            @toggle-select="selection.toggle"
           />
         </div>
+        <div v-else class="table-wrap">
+          <table class="book-table">
+            <thead>
+              <tr>
+                <th class="col-check">
+                  <input
+                    type="checkbox"
+                    :checked="selection.allSelected.value"
+                    @change="selection.allSelected.value ? selection.clearSelection() : selection.selectAll()"
+                  />
+                </th>
+                <th>Cover</th>
+                <th class="sortable" @click="setTableSort('title')">
+                  Title <span class="sort-indicator">{{ sortByVal === 'title' ? (sortOrderVal === 'asc' ? '↑' : '↓') : '' }}</span>
+                </th>
+                <th>Genres</th>
+                <th class="sortable" @click="setTableSort('published_at')">
+                  Year <span class="sort-indicator">{{ sortByVal === 'published_at' ? (sortOrderVal === 'asc' ? '↑' : '↓') : '' }}</span>
+                </th>
+                <th>Publisher</th>
+                <th>Type</th>
+                <th class="sortable" @click="setTableSort('file_size')">
+                  Size <span class="sort-indicator">{{ sortByVal === 'file_size' ? (sortOrderVal === 'asc' ? '↑' : '↓') : '' }}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <BookTableRow
+                v-for="book in books.books"
+                :key="book.id"
+                :book="book"
+                :selected="selection.isSelected(book.id)"
+                @toggle-select="selection.toggle"
+                @show-detail="openDetail"
+              />
+            </tbody>
+          </table>
+        </div>
+
+        <BatchActionBar
+          v-if="selection.hasSelection.value"
+          :count="selection.selectedCount.value"
+          :lists="listsStore.lists"
+          @clear="selection.clearSelection"
+          @delete="onBatchDelete"
+          @add-to-list="onBatchAddToList"
+        />
 
         <div v-if="books.total > 0" class="pagination">
           <span class="total">{{ books.books.length }} of {{ books.total }} book{{ books.total !== 1 ? 's' : '' }}</span>
@@ -210,8 +301,12 @@ import NavBar from '@/components/NavBar.vue'
 import BookCard from '@/components/BookCard.vue'
 import BookDetailModal from '@/components/BookDetailModal.vue'
 import BookEditModal from '@/components/BookEditModal.vue'
+import BookTableRow from '@/components/BookTableRow.vue'
+import BatchActionBar from '@/components/BatchActionBar.vue'
 import { useBooksStore } from '@/stores/books'
 import { useListsStore } from '@/stores/lists'
+import { useSelection } from '@/composables/useSelection'
+import { useHotkeys } from '@/composables/useHotkeys'
 import type { Book, ReadingProgress } from '@/types'
 
 const books = useBooksStore()
@@ -224,8 +319,21 @@ let observer: IntersectionObserver | null = null
 const search = ref('')
 const selectedAuthor = ref('')
 const selectedGenre = ref('')
-const sortByVal = ref<'created_at' | 'title' | 'author' | 'rating' | 'file_size'>('created_at')
+const selectedPublisher = ref('')
+const selectedYear = ref(0)
+const sortByVal = ref<'created_at' | 'title' | 'author' | 'rating' | 'file_size' | 'published_at'>('created_at')
 const sortOrderVal = ref<'asc' | 'desc'>('desc')
+const viewMode = ref<'grid' | 'table'>('grid')
+const searchInputRef = ref<HTMLInputElement | null>(null)
+const selection = useSelection(() => books.books)
+
+const SIDEBAR_LIMIT = 8
+const expandedSidebar = reactive<Record<string, boolean>>({
+  authors: false,
+  genres: false,
+  publishers: false,
+  years: false,
+})
 
 const showFilters = ref(false)
 const selectedBook = ref<Book | null>(null)
@@ -266,6 +374,8 @@ onMounted(async () => {
     books.fetchBooks(),
     books.fetchAuthors(),
     books.fetchGenres(),
+    books.fetchPublishers(),
+    books.fetchYears(),
     listsStore.fetchLists(),
   ])
 
@@ -293,10 +403,13 @@ function currentFilter() {
     search: search.value || undefined,
     author: selectedAuthor.value || undefined,
     genre: selectedGenre.value || undefined,
+    publisher: selectedPublisher.value || undefined,
+    year: selectedYear.value || undefined,
   }
 }
 
 function onSearch() {
+  selection.clearSelection()
   clearTimeout(searchTimer)
   searchTimer = setTimeout(() => books.fetchBooks(currentFilter()), 300)
 }
@@ -304,17 +417,41 @@ function onSearch() {
 function setAuthorFilter(author: string) {
   selectedAuthor.value = author
   selectedGenre.value = ''
+  selection.clearSelection()
   books.fetchBooks(currentFilter())
 }
 
 function setGenreFilter(genre: string) {
   selectedGenre.value = genre
   selectedAuthor.value = ''
+  selection.clearSelection()
+  books.fetchBooks(currentFilter())
+}
+
+function setPublisherFilter(publisher: string) {
+  selectedPublisher.value = publisher
+  selection.clearSelection()
+  books.fetchBooks(currentFilter())
+}
+
+function setYearFilter(year: number) {
+  selectedYear.value = year
+  selection.clearSelection()
   books.fetchBooks(currentFilter())
 }
 
 async function applySort() {
   await books.setSort(sortByVal.value, sortOrderVal.value)
+}
+
+function setTableSort(col: typeof sortByVal.value) {
+  if (sortByVal.value === col) {
+    sortOrderVal.value = sortOrderVal.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortByVal.value = col
+    sortOrderVal.value = 'asc'
+  }
+  applySort()
 }
 
 async function toggleSortDir() {
@@ -344,12 +481,16 @@ function onSaved(updatedBook: Book) {
   if (selectedBook.value?.id === updatedBook.id) {
     selectedBook.value = updatedBook
   }
+  books.fetchPublishers()
+  books.fetchYears()
 }
 
 function onDeleted() {
   selectedBook.value = null
   books.fetchAuthors()
   books.fetchGenres()
+  books.fetchPublishers()
+  books.fetchYears()
 }
 
 function openUploadModal() {
@@ -430,8 +571,74 @@ async function refreshLibraryData() {
     books.fetchBooks(currentFilter()),
     books.fetchAuthors(),
     books.fetchGenres(),
+    books.fetchPublishers(),
+    books.fetchYears(),
   ])
 }
+
+async function onBatchAddToList(listId: string) {
+  const ids = [...selection.selectedIds.value]
+  await Promise.all(ids.map((id) => listsStore.addBook(listId, id)))
+  selection.clearSelection()
+}
+
+async function onBatchDelete() {
+  const ids = [...selection.selectedIds.value]
+  await Promise.all(ids.map((id) => books.deleteBook(id)))
+  selection.clearSelection()
+  books.fetchAuthors()
+  books.fetchGenres()
+  books.fetchPublishers()
+  books.fetchYears()
+}
+
+useHotkeys([
+  {
+    key: '/',
+    handler: () => searchInputRef.value?.focus(),
+  },
+  {
+    key: 'k',
+    ctrl: true,
+    allowInInput: true,
+    handler: () => { searchInputRef.value?.focus(); searchInputRef.value?.select() },
+  },
+  {
+    key: 'u',
+    handler: () => openUploadModal(),
+  },
+  {
+    key: 't',
+    handler: () => { viewMode.value = viewMode.value === 'grid' ? 'table' : 'grid' },
+  },
+  {
+    key: 'a',
+    handler: () => {
+      if (selection.allSelected.value) {
+        selection.clearSelection()
+      } else {
+        selection.selectAll()
+      }
+    },
+  },
+  {
+    key: 'Escape',
+    allowInInput: true,
+    handler: () => {
+      if (selection.hasSelection.value) {
+        selection.clearSelection()
+      } else if (showUpload.value) {
+        closeUploadModal()
+      } else if (showAddToList.value) {
+        showAddToList.value = false
+      } else if (bookToEdit.value) {
+        bookToEdit.value = null
+      } else if (selectedBook.value) {
+        selectedBook.value = null
+      }
+    },
+  },
+])
 
 async function uploadBooks() {
   if (uploadQueue.value.length === 0 || uploading.value || uploadFinished.value) return
@@ -532,6 +739,7 @@ async function uploadBooks() {
 }
 .filter-item:hover { background: var(--surface-hover); color: var(--text); }
 .filter-item.active { background: var(--surface-hover); color: var(--accent); }
+.filter-item.show-more { color: var(--accent); font-size: 0.78rem; justify-content: center; }
 .filter-name {
   overflow: hidden;
   white-space: nowrap;
@@ -555,8 +763,14 @@ async function uploadBooks() {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-bottom: 1.5rem;
   flex-wrap: wrap;
+  position: sticky;
+  top: 56px;
+  z-index: 90;
+  background: var(--bg);
+  padding: 0.75rem 0;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
 }
 .search-wrap { flex: 1; min-width: 160px; max-width: 380px; }
 .sort-wrap {
@@ -722,6 +936,47 @@ async function uploadBooks() {
   gap: 0.75rem;
   margin-top: 0.75rem;
 }
+
+/* Table view */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-top: 0.75rem;
+}
+.book-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.book-table thead tr {
+  background: var(--surface);
+  border-bottom: 2px solid var(--border);
+}
+.book-table th {
+  padding: 0.65rem 0.85rem;
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.book-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.book-table th.sortable:hover { color: var(--text); }
+.col-check { width: 2.5rem; text-align: center; }
+.col-check input[type='checkbox'] {
+  cursor: pointer;
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent);
+}
+.sort-indicator { color: var(--accent); margin-left: 0.2rem; }
+.view-toggle { font-size: 1.1rem; padding: 0.4rem 0.6rem; }
 
 /* Mobile responsiveness */
 .filter-toggle { display: none; }

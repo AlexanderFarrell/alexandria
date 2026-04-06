@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,7 +41,17 @@ func (r *bookRepo) GetByID(ctx context.Context, id string) (*domain.Book, error)
 	if err != nil {
 		return nil, fmt.Errorf("get book: %w", err)
 	}
-	return fromBookModel(&m), nil
+	book := fromBookModel(&m)
+
+	var linkModels []BookLinkModel
+	if err := r.db.WithContext(ctx).Where("book_id = ?", id).Order("created_at ASC").Find(&linkModels).Error; err != nil {
+		return nil, fmt.Errorf("get book links: %w", err)
+	}
+	book.Links = make([]domain.BookLink, len(linkModels))
+	for i, lm := range linkModels {
+		book.Links[i] = fromLinkModel(&lm)
+	}
+	return book, nil
 }
 
 func (r *bookRepo) List(ctx context.Context, filter repos.BookFilter) ([]*domain.Book, int64, error) {
@@ -56,6 +67,12 @@ func (r *bookRepo) List(ctx context.Context, filter repos.BookFilter) ([]*domain
 	// Use json_each for exact genre matching (SQLite 3.38+, which modernc.org/sqlite 1.23+ provides)
 	if filter.Genre != "" {
 		q = q.Where("EXISTS (SELECT 1 FROM json_each(meta_genres) WHERE value = ?)", filter.Genre)
+	}
+	if filter.Publisher != "" {
+		q = q.Where("meta_publisher = ?", filter.Publisher)
+	}
+	if filter.Year > 0 {
+		q = q.Where("strftime('%Y', meta_published_at) = ?", strconv.Itoa(filter.Year))
 	}
 
 	var total int64
@@ -75,11 +92,12 @@ func (r *bookRepo) List(ctx context.Context, filter repos.BookFilter) ([]*domain
 
 	// Build sort clause from allowlist to prevent injection
 	validSortCols := map[string]string{
-		"title":      "LOWER(books.title)",
-		"author":     "LOWER(books.author)",
-		"created_at": "books.created_at",
-		"rating":     "rp.rating",
-		"file_size":  "books.file_size",
+		"title":        "LOWER(books.title)",
+		"author":       "LOWER(books.author)",
+		"created_at":   "books.created_at",
+		"rating":       "rp.rating",
+		"file_size":    "books.file_size",
+		"published_at": "books.meta_published_at",
 	}
 	col, ok := validSortCols[filter.SortBy]
 	if !ok {
@@ -120,10 +138,48 @@ func (r *bookRepo) Update(ctx context.Context, book *domain.Book) error {
 }
 
 func (r *bookRepo) Delete(ctx context.Context, id string) error {
+	if err := r.db.WithContext(ctx).Delete(&BookLinkModel{}, "book_id = ?", id).Error; err != nil {
+		return fmt.Errorf("delete book links: %w", err)
+	}
 	if err := r.db.WithContext(ctx).Delete(&BookModel{}, "id = ?", id).Error; err != nil {
 		return fmt.Errorf("delete book: %w", err)
 	}
 	return nil
+}
+
+func (r *bookRepo) AddLink(ctx context.Context, link *domain.BookLink) error {
+	m := toLinkModel(link)
+	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
+		return fmt.Errorf("add link: %w", err)
+	}
+	return nil
+}
+
+func (r *bookRepo) UpdateLink(ctx context.Context, link *domain.BookLink) error {
+	m := toLinkModel(link)
+	if err := r.db.WithContext(ctx).Save(&m).Error; err != nil {
+		return fmt.Errorf("update link: %w", err)
+	}
+	return nil
+}
+
+func (r *bookRepo) DeleteLink(ctx context.Context, bookID, linkID string) error {
+	if err := r.db.WithContext(ctx).Delete(&BookLinkModel{}, "id = ? AND book_id = ?", linkID, bookID).Error; err != nil {
+		return fmt.Errorf("delete link: %w", err)
+	}
+	return nil
+}
+
+func (r *bookRepo) ListLinks(ctx context.Context, bookID string) ([]domain.BookLink, error) {
+	var models []BookLinkModel
+	if err := r.db.WithContext(ctx).Where("book_id = ?", bookID).Order("created_at ASC").Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("list links: %w", err)
+	}
+	links := make([]domain.BookLink, len(models))
+	for i := range models {
+		links[i] = fromLinkModel(&models[i])
+	}
+	return links, nil
 }
 
 // ListAuthors returns distinct authors with book counts, ordered by count descending.
@@ -147,6 +203,30 @@ func (r *bookRepo) ListGenres(ctx context.Context) ([]repos.GenreSummary, error)
 	).Scan(&results).Error
 	if err != nil {
 		return nil, fmt.Errorf("list genres: %w", err)
+	}
+	return results, nil
+}
+
+// ListPublishers returns distinct publishers with book counts, ordered by count descending.
+func (r *bookRepo) ListPublishers(ctx context.Context) ([]repos.PublisherSummary, error) {
+	var results []repos.PublisherSummary
+	err := r.db.WithContext(ctx).Raw(
+		"SELECT meta_publisher as publisher, COUNT(*) as count FROM books WHERE meta_publisher != '' GROUP BY meta_publisher ORDER BY count DESC",
+	).Scan(&results).Error
+	if err != nil {
+		return nil, fmt.Errorf("list publishers: %w", err)
+	}
+	return results, nil
+}
+
+// ListYears returns distinct publication years with book counts, ordered by year descending.
+func (r *bookRepo) ListYears(ctx context.Context) ([]repos.YearSummary, error) {
+	var results []repos.YearSummary
+	err := r.db.WithContext(ctx).Raw(
+		"SELECT CAST(strftime('%Y', meta_published_at) AS INTEGER) as year, COUNT(*) as count FROM books WHERE meta_published_at IS NOT NULL GROUP BY year ORDER BY year DESC",
+	).Scan(&results).Error
+	if err != nil {
+		return nil, fmt.Errorf("list years: %w", err)
 	}
 	return results, nil
 }
@@ -196,6 +276,28 @@ func fromBookModel(m *BookModel) *domain.Book {
 		ZealotTicketID: m.ZealotTicketID,
 		CreatedAt:      m.CreatedAt,
 		UpdatedAt:      m.UpdatedAt,
+	}
+}
+
+func toLinkModel(l *domain.BookLink) BookLinkModel {
+	return BookLinkModel{
+		ID:        l.ID,
+		BookID:    l.BookID,
+		Label:     l.Label,
+		URL:       l.URL,
+		CreatedAt: l.CreatedAt,
+		UpdatedAt: l.UpdatedAt,
+	}
+}
+
+func fromLinkModel(m *BookLinkModel) domain.BookLink {
+	return domain.BookLink{
+		ID:        m.ID,
+		BookID:    m.BookID,
+		Label:     m.Label,
+		URL:       m.URL,
+		CreatedAt: m.CreatedAt,
+		UpdatedAt: m.UpdatedAt,
 	}
 }
 

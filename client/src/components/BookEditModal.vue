@@ -47,6 +47,32 @@
             <label>Tags <span class="hint">(comma-separated)</span></label>
             <input v-model="form.tagsRaw" type="text" placeholder="e.g. classic, recommended" />
           </div>
+          <div class="field">
+            <label>Links</label>
+            <div class="links-editor">
+              <div
+                v-for="(draft, idx) in linkDrafts"
+                :key="draft.id ?? idx"
+                class="link-row"
+              >
+                <input v-model="draft.label" type="text" placeholder="Label" />
+                <input v-model="draft.url" type="url" placeholder="https://…" />
+                <button
+                  type="button"
+                  class="btn-ghost btn-sm"
+                  :disabled="draft.saving"
+                  @click="saveLinkRow(draft)"
+                >{{ draft.saving ? '…' : 'Save' }}</button>
+                <button
+                  type="button"
+                  class="btn-ghost btn-sm btn-danger-ghost"
+                  @click="deleteLinkRow(draft, idx)"
+                >✕</button>
+                <span v-if="draft.error" class="link-error">{{ draft.error }}</span>
+              </div>
+              <button type="button" class="btn-ghost btn-sm" @click="addLinkRow">+ Add link</button>
+            </div>
+          </div>
         </div>
 
         <p v-if="error" class="error-msg">{{ error }}</p>
@@ -76,6 +102,14 @@ import { useBooksStore } from '@/stores/books'
 import type { Book, MetadataResult } from '@/types'
 import MetadataSearchModal from './MetadataSearchModal.vue'
 
+interface LinkDraft {
+  id: string | null
+  label: string
+  url: string
+  saving: boolean
+  error: string
+}
+
 const props = defineProps<{ book: Book }>()
 const emit = defineEmits<{
   (e: 'close'): void
@@ -89,6 +123,45 @@ const showMetadataSearch = ref(false)
 const pendingCoverURL = ref<string | null>(null)
 
 const meta = props.book.metadata
+
+const linkDrafts = ref<LinkDraft[]>(
+  (props.book.links ?? []).map((l) => ({
+    id: l.id,
+    label: l.label,
+    url: l.url,
+    saving: false,
+    error: '',
+  })),
+)
+
+function addLinkRow() {
+  linkDrafts.value.push({ id: null, label: '', url: '', saving: false, error: '' })
+}
+
+async function saveLinkRow(draft: LinkDraft) {
+  draft.error = ''
+  draft.saving = true
+  try {
+    if (draft.id === null) {
+      const link = await booksStore.addBookLink(props.book.id, { label: draft.label, url: draft.url })
+      draft.id = link.id
+    } else {
+      await booksStore.updateBookLink(props.book.id, draft.id, { label: draft.label, url: draft.url })
+    }
+  } catch (e: unknown) {
+    draft.error =
+      (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Save failed'
+  } finally {
+    draft.saving = false
+  }
+}
+
+async function deleteLinkRow(draft: LinkDraft, idx: number) {
+  if (draft.id !== null) {
+    await booksStore.deleteBookLink(props.book.id, draft.id)
+  }
+  linkDrafts.value.splice(idx, 1)
+}
 
 function toDateInput(iso?: string) {
   if (!iso) return ''
@@ -213,6 +286,28 @@ async function onSubmit() {
 textarea {
   resize: vertical;
   min-height: 70px;
+}
+.links-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.link-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr auto auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+.link-row input {
+  min-width: 0;
+}
+.btn-danger-ghost {
+  color: var(--danger, #e05c5c);
+}
+.link-error {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+  color: var(--danger, #e05c5c);
 }
 .modal-actions {
   display: flex;

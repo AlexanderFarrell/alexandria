@@ -55,7 +55,10 @@
             >
               <BookCard
                 :book="book"
+                :selectable="true"
+                :selected="selection.isSelected(book.id)"
                 @show-detail="openDetail(book)"
+                @toggle-select="selection.toggle"
               />
               <button
                 class="remove-book btn-ghost"
@@ -64,6 +67,15 @@
               >Remove</button>
             </div>
           </div>
+
+          <BatchActionBar
+            v-if="selection.hasSelection.value"
+            :count="selection.selectedCount.value"
+            :show-remove="true"
+            @clear="selection.clearSelection"
+            @remove="onBatchRemove"
+            @delete="() => {}"
+          />
         </template>
         <div v-else class="state-msg placeholder">
           Select a list to see its books.
@@ -126,16 +138,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import NavBar from '@/components/NavBar.vue'
 import BookCard from '@/components/BookCard.vue'
 import BookDetailModal from '@/components/BookDetailModal.vue'
+import BatchActionBar from '@/components/BatchActionBar.vue'
 import { useListsStore } from '@/stores/lists'
+import { useSelection } from '@/composables/useSelection'
 import type { Book } from '@/types'
 
 const listsStore = useListsStore()
 const router = useRouter()
+const selection = useSelection(() => listsStore.currentBooks)
+
+// Clear selection when switching lists
+watch(() => listsStore.currentList?.id, () => selection.clearSelection())
 
 const showCreate = ref(false)
 const newName = ref('')
@@ -192,6 +210,13 @@ async function onRename() {
 async function onRemoveBook(bookId: string) {
   if (!listsStore.currentList) return
   await listsStore.removeBook(listsStore.currentList.id, bookId)
+}
+
+async function onBatchRemove() {
+  if (!listsStore.currentList) return
+  const ids = [...selection.selectedIds.value]
+  await Promise.all(ids.map((id) => listsStore.removeBook(listsStore.currentList!.id, id)))
+  selection.clearSelection()
 }
 
 function openDetail(book: Book) {

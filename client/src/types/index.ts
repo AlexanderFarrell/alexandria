@@ -7,6 +7,15 @@ export interface BookMetadata {
   tags?: string[]
 }
 
+export interface BookLink {
+  id: string
+  book_id: string
+  label: string
+  url: string
+  created_at: string
+  updated_at: string
+}
+
 export interface Book {
   id: string
   title: string
@@ -18,6 +27,7 @@ export interface Book {
   file_size: number
   metadata: BookMetadata
   zealot_ticket_id?: string
+  links?: BookLink[]
   created_at: string
   updated_at: string
 }
@@ -98,6 +108,16 @@ export interface AuthorSummary {
 
 export interface GenreSummary {
   genre: string
+  count: number
+}
+
+export interface PublisherSummary {
+  publisher: string
+  count: number
+}
+
+export interface YearSummary {
+  year: number
   count: number
 }
 
