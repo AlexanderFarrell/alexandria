@@ -331,6 +331,7 @@ import NavBar from '@/components/NavBar.vue'
 import ReaderNavTree from '@/components/reader/ReaderNavTree.vue'
 import { getContentBlob, getReaderManifest, getReaderSection } from '@/api/books'
 import { useBooksStore } from '@/stores/books'
+import { useServerConfigStore } from '@/stores/serverConfig'
 import type { ReaderManifest, ReaderSection } from '@/types'
 
 const READABLE_BLOCK_SELECTOR = 'p, li, blockquote, dd, dt, figcaption, h1, h2, h3, h4, h5, h6'
@@ -404,6 +405,7 @@ const presetThemes: Record<Exclude<ThemePreset, 'custom'>, ThemePalette> = {
 
 const route = useRoute()
 const books = useBooksStore()
+const serverConfig = useServerConfigStore()
 
 const readerFrame = ref<HTMLIFrameElement | null>(null)
 
@@ -797,6 +799,19 @@ async function loadSection(
     if (token !== currentSectionLoadToken) return
 
     currentSection.value = response.section
+    // In Tauri, srcdoc iframes resolve relative URLs against tauri://localhost, not the
+    // configured server. Rewrite /api/ paths to absolute URLs so images load correctly.
+    const serverBase = serverConfig.serverUrl
+    if (serverBase && currentSection.value) {
+      const html = currentSection.value.html
+      currentSection.value = {
+        ...currentSection.value,
+        html: html
+          .replace(/="\/api\//g, `="${serverBase}/api/`)
+          .replace(/='\/api\//g, `='${serverBase}/api/`)
+          .replace(/url\(\/api\//g, `url(${serverBase}/api/`),
+      }
+    }
     currentSectionId.value = response.section.id
     currentFragment.value = ''
     pendingRestore = {
@@ -1516,7 +1531,9 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.85rem 1rem;
-  padding: 0.65rem 1rem;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-inline: 1rem;
+  padding-bottom: 0.65rem;
   border-bottom: 1px solid var(--reader-border);
   background: color-mix(in srgb, var(--reader-surface) 94%, transparent);
   backdrop-filter: blur(10px);
@@ -1973,7 +1990,8 @@ onUnmounted(() => {
 
 @media (max-width: 720px) {
   .reader-header {
-    padding: 0.6rem 0.85rem;
+    padding-inline: 0.85rem;
+    padding-bottom: 0.6rem;
     gap: 0.7rem;
   }
 
@@ -2085,7 +2103,8 @@ onUnmounted(() => {
 
 @media (max-width: 480px) {
   .reader-header {
-    padding: 0.58rem 0.72rem;
+    padding-inline: 0.72rem;
+    padding-bottom: 0.58rem;
   }
 
   .reader-heading {

@@ -9,8 +9,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"alexandria/app/repos"
-	"alexandria/domain"
+	"alexandria/internal/app/repos"
+	"alexandria/internal/domain"
 )
 
 type listRepo struct {

@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"alexandria/app/ports"
+	"alexandria/internal/app/ports"
 )
 
 // GoogleBooksProvider queries the Google Books public API (no API key required).

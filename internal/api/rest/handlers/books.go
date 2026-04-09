@@ -11,9 +11,9 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"alexandria/api/rest/middleware"
-	"alexandria/app/repos"
-	"alexandria/app/services"
+	"alexandria/internal/api/rest/middleware"
+	"alexandria/internal/app/repos"
+	"alexandria/internal/app/services"
 )
 
 type BookHandler struct {

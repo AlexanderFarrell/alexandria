@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"alexandria/config"
-	"alexandria/domain"
+	"alexandria/internal/config"
+	"alexandria/internal/domain"
 )
 
 type memoryUserRepo struct {

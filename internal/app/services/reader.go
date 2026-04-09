@@ -12,10 +12,10 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
-	"alexandria/app/repos"
-	"alexandria/config"
-	"alexandria/domain"
-	"alexandria/infra/epub"
+	"alexandria/internal/app/repos"
+	"alexandria/internal/config"
+	"alexandria/internal/domain"
+	"alexandria/internal/infra/epub"
 )
 
 const readerAssetTokenTTL = time.Hour

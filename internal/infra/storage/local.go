@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"alexandria/app/ports"
-	"alexandria/domain"
+	"alexandria/internal/app/ports"
+	"alexandria/internal/domain"
 )
 
 type localFileStore struct {

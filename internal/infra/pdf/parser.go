@@ -16,7 +16,7 @@ import (
 	pdfapi "github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 
-	"alexandria/domain"
+	"alexandria/internal/domain"
 )
 
 func init() {

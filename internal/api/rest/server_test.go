@@ -18,12 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"alexandria/app"
-	"alexandria/config"
-	"alexandria/domain"
-	"alexandria/infra/epub"
-	"alexandria/infra/sqlite"
-	"alexandria/infra/storage"
+	"alexandria/internal/app"
+	"alexandria/internal/config"
+	"alexandria/internal/domain"
+	"alexandria/internal/infra/epub"
+	"alexandria/internal/infra/sqlite"
+	"alexandria/internal/infra/storage"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"

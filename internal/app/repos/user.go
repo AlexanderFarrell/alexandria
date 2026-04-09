@@ -3,7 +3,7 @@ package repos
 import (
 	"context"
 
-	"alexandria/domain"
+	"alexandria/internal/domain"
 )
 
 // UserRepo is the data-access interface for users.

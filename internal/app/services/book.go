@@ -16,10 +16,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"alexandria/app/ports"
-	"alexandria/app/repos"
-	"alexandria/config"
-	"alexandria/domain"
+	"alexandria/internal/app/ports"
+	"alexandria/internal/app/repos"
+	"alexandria/internal/config"
+	"alexandria/internal/domain"
 )
 
 // UploadInput carries the file and optional metadata override for a new book.

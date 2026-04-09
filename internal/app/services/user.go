@@ -3,8 +3,8 @@ package services
 import (
 	"context"
 
-	"alexandria/app/repos"
-	"alexandria/domain"
+	"alexandria/internal/app/repos"
+	"alexandria/internal/domain"
 )
 
 // UserService exposes read-only user lookups needed by API layers.

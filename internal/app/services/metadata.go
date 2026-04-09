@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"alexandria/app/ports"
+	"alexandria/internal/app/ports"
 )
 
 // ProviderError records a failure from one metadata provider.

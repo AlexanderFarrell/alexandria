@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strconv"
 
-	"alexandria/app/ports"
+	"alexandria/internal/app/ports"
 )
 
 // OpenLibraryProvider queries the Open Library search API (no API key required).

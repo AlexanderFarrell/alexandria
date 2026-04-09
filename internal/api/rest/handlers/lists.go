@@ -3,8 +3,8 @@ package handlers
 import (
 	"github.com/gofiber/fiber/v2"
 
-	"alexandria/api/rest/middleware"
-	"alexandria/app/services"
+	"alexandria/internal/api/rest/middleware"
+	"alexandria/internal/app/services"
 )
 
 type ListHandler struct {

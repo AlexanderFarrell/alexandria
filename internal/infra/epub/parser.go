@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"alexandria/app/ports"
-	"alexandria/domain"
+	"alexandria/internal/app/ports"
+	"alexandria/internal/domain"
 )
 
 type Parser struct{}

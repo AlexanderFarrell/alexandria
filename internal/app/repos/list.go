@@ -3,7 +3,7 @@ package repos
 import (
 	"context"
 
-	"alexandria/domain"
+	"alexandria/internal/domain"
 )
 
 // ListRepo is the data-access interface for book lists.

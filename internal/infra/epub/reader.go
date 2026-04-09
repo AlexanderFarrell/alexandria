@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	"alexandria/domain"
+	"alexandria/internal/domain"
 )
 
 const (

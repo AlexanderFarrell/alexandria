@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"alexandria/app/repos"
-	"alexandria/domain"
+	"alexandria/internal/app/repos"
+	"alexandria/internal/domain"
 )
 
 // ListService manages user-curated book lists.

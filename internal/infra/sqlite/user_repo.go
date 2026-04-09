@@ -7,8 +7,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"alexandria/app/repos"
-	"alexandria/domain"
+	"alexandria/internal/app/repos"
+	"alexandria/internal/domain"
 )
 
 type userRepo struct {

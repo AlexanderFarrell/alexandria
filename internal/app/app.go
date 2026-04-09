@@ -1,10 +1,10 @@
 package app
 
 import (
-	"alexandria/app/ports"
-	"alexandria/app/repos"
-	"alexandria/app/services"
-	"alexandria/config"
+	"alexandria/internal/app/ports"
+	"alexandria/internal/app/repos"
+	"alexandria/internal/app/services"
+	"alexandria/internal/config"
 )
 
 // App is the application core — it holds all services and is passed to the API layer.

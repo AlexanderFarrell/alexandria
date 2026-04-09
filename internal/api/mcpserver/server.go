@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"alexandria/app"
-	apprepos "alexandria/app/repos"
-	"alexandria/app/services"
-	"alexandria/config"
-	"alexandria/domain"
+	"alexandria/internal/app"
+	apprepos "alexandria/internal/app/repos"
+	"alexandria/internal/app/services"
+	"alexandria/internal/config"
+	"alexandria/internal/domain"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )

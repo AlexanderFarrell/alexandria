@@ -3,7 +3,7 @@ package repos
 import (
 	"context"
 
-	"alexandria/domain"
+	"alexandria/internal/domain"
 )
 
 // BookFilter describes optional filtering, sorting, and pagination for book listings.

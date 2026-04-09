@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
-	"alexandria/app/repos"
-	"alexandria/config"
-	"alexandria/domain"
+	"alexandria/internal/app/repos"
+	"alexandria/internal/config"
+	"alexandria/internal/domain"
 )
 
 // Tokens holds the JWT pair returned after a successful auth operation.

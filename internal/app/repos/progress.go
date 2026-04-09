@@ -3,7 +3,7 @@ package repos
 import (
 	"context"
 
-	"alexandria/domain"
+	"alexandria/internal/domain"
 )
 
 // ProgressRepo is the data-access interface for reading progress.

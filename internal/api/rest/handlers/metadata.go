@@ -3,8 +3,8 @@ package handlers
 import (
 	"github.com/gofiber/fiber/v2"
 
-	"alexandria/app/ports"
-	"alexandria/app/services"
+	"alexandria/internal/app/ports"
+	"alexandria/internal/app/services"
 )
 
 // MetadataHandler exposes online metadata search to the API layer.

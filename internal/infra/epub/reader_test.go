@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"alexandria/domain"
+	"alexandria/internal/domain"
 )
 
 func TestReaderBookBuildsSpineOrderedManifestFromNavDoc(t *testing.T) {

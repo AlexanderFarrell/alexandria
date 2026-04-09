@@ -765,7 +765,7 @@ async function uploadBooks() {
   gap: 0.75rem;
   flex-wrap: wrap;
   position: sticky;
-  top: 56px;
+  top: calc(56px + env(safe-area-inset-top, 0px));
   z-index: 90;
   background: var(--bg);
   padding: 0.75rem 0;
@@ -988,6 +988,17 @@ async function uploadBooks() {
   .filter-toggle { display: inline-flex; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 1rem; }
   .search-wrap { min-width: 0; max-width: none; }
+}
+
+@media (max-width: 540px) {
+  .search-wrap {
+    flex: 1 1 100%;
+    order: -1;
+  }
+  .search-wrap input {
+    font-size: 1rem;
+    padding: 0.65rem 0.9rem;
+  }
 }
 
 @media (max-width: 400px) {

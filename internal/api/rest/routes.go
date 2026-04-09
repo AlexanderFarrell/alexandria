@@ -3,8 +3,8 @@ package rest
 import (
 	"github.com/gofiber/fiber/v2"
 
-	"alexandria/api/rest/handlers"
-	mw "alexandria/api/rest/middleware"
+	"alexandria/internal/api/rest/handlers"
+	mw "alexandria/internal/api/rest/middleware"
 )
 
 func (s *FiberServer) registerRoutes(

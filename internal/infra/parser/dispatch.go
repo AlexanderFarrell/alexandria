@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"alexandria/app/ports"
-	"alexandria/domain"
+	"alexandria/internal/app/ports"
+	"alexandria/internal/domain"
 )
 
 // DispatchParser routes ParseMetadata and ExtractCover calls to the appropriate

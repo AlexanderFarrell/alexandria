@@ -3,7 +3,7 @@ package ports
 import (
 	"context"
 
-	"alexandria/domain"
+	"alexandria/internal/domain"
 )
 
 // BookParser extracts structured metadata from a book file.

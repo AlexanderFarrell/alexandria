@@ -6,9 +6,9 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"alexandria/api/rest/middleware"
-	"alexandria/app/services"
-	"alexandria/domain"
+	"alexandria/internal/api/rest/middleware"
+	"alexandria/internal/app/services"
+	"alexandria/internal/domain"
 )
 
 type AuthHandler struct {

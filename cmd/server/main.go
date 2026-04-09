@@ -10,17 +10,17 @@ import (
 	"syscall"
 	"time"
 
-	"alexandria/api/rest"
-	"alexandria/app"
-	"alexandria/app/ports"
-	"alexandria/config"
-	"alexandria/domain"
-	"alexandria/infra/epub"
-	"alexandria/infra/metadata"
-	"alexandria/infra/parser"
-	"alexandria/infra/pdf"
-	"alexandria/infra/sqlite"
-	"alexandria/infra/storage"
+	"alexandria/internal/api/rest"
+	"alexandria/internal/app"
+	"alexandria/internal/app/ports"
+	"alexandria/internal/config"
+	"alexandria/internal/domain"
+	"alexandria/internal/infra/epub"
+	"alexandria/internal/infra/metadata"
+	"alexandria/internal/infra/parser"
+	"alexandria/internal/infra/pdf"
+	"alexandria/internal/infra/sqlite"
+	"alexandria/internal/infra/storage"
 )
 
 func main() {

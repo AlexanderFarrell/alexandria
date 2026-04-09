@@ -5,7 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"alexandria/app/services"
+	"alexandria/internal/app/services"
 )
 
 const UserIDKey = "userID"

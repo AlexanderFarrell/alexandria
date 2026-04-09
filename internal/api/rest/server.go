@@ -11,11 +11,11 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
-	"alexandria/api/mcpserver"
-	"alexandria/api/rest/handlers"
-	"alexandria/app"
-	"alexandria/app/services"
-	"alexandria/config"
+	"alexandria/internal/api/mcpserver"
+	"alexandria/internal/api/rest/handlers"
+	"alexandria/internal/app"
+	"alexandria/internal/app/services"
+	"alexandria/internal/config"
 )
 
 // FiberServer implements apis.Server using the Fiber framework.
