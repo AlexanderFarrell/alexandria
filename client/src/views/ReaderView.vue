@@ -84,6 +84,10 @@
           >
             Settings
           </button>
+
+          <button class="btn-ghost toolbar-btn" @click="copyBookLink">
+            {{ linkCopied ? 'Copied!' : 'Copy link' }}
+          </button>
         </div>
       </div>
 
@@ -423,6 +427,7 @@ const currentFragment = ref('')
 const currentPercentage = ref(0)
 const navOpen = ref(false)
 const settingsOpen = ref(false)
+const linkCopied = ref(false)
 
 const ttsSupported = ref(false)
 const ttsMode = ref<TtsMode>('idle')
@@ -844,6 +849,12 @@ function toggleSettings() {
   const next = !settingsOpen.value
   if (next) navOpen.value = false
   settingsOpen.value = next
+}
+
+async function copyBookLink() {
+  await navigator.clipboard.writeText(window.location.href)
+  linkCopied.value = true
+  setTimeout(() => { linkCopied.value = false }, 2000)
 }
 
 function toggleParagraphPickerFromSettings() {
@@ -1532,7 +1543,8 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.85rem 1rem;
   padding-top: env(safe-area-inset-top, 0px);
-  padding-inline: 1rem;
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
   padding-bottom: 0.65rem;
   border-bottom: 1px solid var(--reader-border);
   background: color-mix(in srgb, var(--reader-surface) 94%, transparent);

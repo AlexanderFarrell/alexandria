@@ -169,4 +169,13 @@ const initials = computed(() => {
   font-size: 0.7rem;
   margin-top: 0.2rem;
 }
+
+@media (max-width: 400px) {
+  .title {
+    font-size: 0.95rem;
+  }
+  .author {
+    font-size: 0.82rem;
+  }
+}
 </style>

@@ -36,7 +36,8 @@ function logout() {
   gap: 0.75rem 1rem;
   flex-wrap: wrap;
   padding-top: env(safe-area-inset-top, 0px);
-  padding-inline: 2rem;
+  padding-left: max(2rem, env(safe-area-inset-left, 0px));
+  padding-right: max(2rem, env(safe-area-inset-right, 0px));
   min-height: 56px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -93,7 +94,8 @@ function logout() {
 
 @media (max-width: 720px) {
   .navbar {
-    padding-inline: 1rem;
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
   }
 
   .brand {
@@ -124,7 +126,8 @@ function logout() {
   .navbar.is-compact-mobile {
     flex-wrap: nowrap;
     min-height: 48px;
-    padding-inline: 0.8rem;
+    padding-left: max(0.8rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.8rem, env(safe-area-inset-right, 0px));
   }
 
   .navbar.is-compact-mobile .brand {

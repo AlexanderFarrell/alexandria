@@ -96,6 +96,7 @@
       <div class="modal-actions">
         <button class="btn-danger" @click="onDelete">Delete</button>
         <div class="right-actions">
+          <button class="btn-ghost" @click="copyBookLink">{{ linkCopied ? 'Copied!' : 'Copy link' }}</button>
           <button class="btn-ghost" @click="$emit('add-to-list', book)">+ Add to list</button>
           <button
             v-if="book.file_type !== 'url'"
@@ -135,6 +136,13 @@ const booksStore = useBooksStore()
 
 const localRating = ref<number | undefined>(props.progress?.rating)
 const refreshing = ref(false)
+const linkCopied = ref(false)
+
+async function copyBookLink() {
+  await navigator.clipboard.writeText(`${window.location.origin}/books/${props.book.id}`)
+  linkCopied.value = true
+  setTimeout(() => { linkCopied.value = false }, 2000)
+}
 
 watch(() => props.progress?.rating, (val) => {
   localRating.value = val
